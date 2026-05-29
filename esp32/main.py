@@ -36,6 +36,22 @@ SONGS = {
     'happy': [(60, 16), (64, 16), (67, 16), (72, 32)],      # C major arpeggio
 }
 
+def read_battery():
+    # Request packet 25 (charge) and 26 (capacity) via Query List opcode 149
+    _send([149, 2, 25, 26])
+    time.sleep_ms(50)
+    data = uart.read(4)
+    if data is None or len(data) < 4:
+        print("Battery: no response from Roomba")
+        return
+    charge   = (data[0] << 8) | data[1]   # mAh
+    capacity = (data[2] << 8) | data[3]   # mAh
+    if capacity > 0:
+        pct = charge * 100 // capacity
+        print(f"Battery: {charge}/{capacity} mAh  ({pct}%)")
+    else:
+        print(f"Battery charge: {charge} mAh (capacity unknown)")
+
 def _send(data):
     uart.write(bytes(data))
 
@@ -148,6 +164,7 @@ def init_roomba():
         print("[OK] Roomba OI active. Safe mode on.")
         define_song(0, SONGS['happy'])
         play_song(0)
+        read_battery()
     else:
         print("")
         print("!!! Roomba did NOT respond !!!")
