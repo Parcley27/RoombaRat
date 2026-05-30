@@ -5,7 +5,7 @@ import os
 rekognition = boto3.client('rekognition', region_name=os.getenv('AWS_REGION', 'us-east-2'))
 
 PHONE_LABELS = {'Cell Phone', 'Mobile Phone', 'Phone', 'Smartphone', 'Iphone', 'Ipod'}
-DISTRACTION_LABELS = {'Game', 'Video Gaming', 'TV', 'Super Mario', 'VR Headset'}
+DISTRACTION_LABELS = {'Game', 'Video Gaming', 'Super Mario', 'VR Headset'}
 MIN_CONFIDENCE = float(os.getenv('MIN_CONFIDENCE', '70'))
 
 
