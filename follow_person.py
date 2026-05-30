@@ -4,26 +4,25 @@ import time
 import sys
 import argparse
 
-# --- tuning ---
 CAMERA_INDEX = 0
-FACE_TIMEOUT = 0.5    # seconds to coast on last known position before searching
-CMD_INTERVAL = 0.10   # min seconds between sending repeated identical commands
+FACE_TIMEOUT = 0.5
+CMD_INTERVAL = 0.10
 
-TARGET_AREA_MIN = 0.03   # drive forward below this (face too small = too far)
-TARGET_AREA_MAX = 0.07   # back up above this (face too large = too close)
-TURN_THRESHOLD = 0.08   # horizontal dead zone — no correction below this
-SPIN_THRESHOLD = 0.40   # in-place spin above this, curved drive below
+TARGET_AREA_MIN = 0.03
+TARGET_AREA_MAX = 0.07
+TURN_THRESHOLD = 0.08
+SPIN_THRESHOLD = 0.40
 
-FORWARD_SPEED = 180    # mm/s base forward speed
-SEARCH_SPEED = 60     # mm/s spin speed when no face detected
-BACKUP_SPEED = -80    # mm/s when too close
+FORWARD_SPEED = 180
+SEARCH_SPEED = 60
+BACKUP_SPEED = -80
 
 STRAIGHT = -32768
 CW_SPIN = -1
 CCW_SPIN = 1
 
 CMD_PORT = 9000
-CONFIRM_FRAMES = 2 # make tracking more stable
+CONFIRM_FRAMES = 2
 
 face_cascade = cv2.CascadeClassifier(
     cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
@@ -44,24 +43,20 @@ def detect_largest_face(frame):
 
 
 def compute_drive(horiz_err, area_ratio):
-    # Too close — back up
     if area_ratio > TARGET_AREA_MAX:
         return BACKUP_SPEED, STRAIGHT
 
-    # Large error — spin in place to re-centre before driving
     if abs(horiz_err) >= SPIN_THRESHOLD:
         return 100, (CW_SPIN if horiz_err > 0 else CCW_SPIN)
 
-    # Proportional curve forward
     t      = min(abs(horiz_err) / SPIN_THRESHOLD, 1.0)
-    r_mag  = int(800 * (1 - t) + 200 * t)   # 800mm (gentle) → 200mm (sharp)
+    r_mag  = int(800 * (1 - t) + 200 * t)
     radius = -r_mag if horiz_err > 0 else r_mag
 
-    # Always drive forward — faster when far, slower (but never stopped) when close
     if area_ratio < TARGET_AREA_MIN:
         speed = FORWARD_SPEED
     else:
-        speed = 100   # at target distance: slow crawl so it stays engaged
+        speed = 100
 
     return speed, radius
 
@@ -95,12 +90,12 @@ def main():
     frame_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     frame_area = frame_w * frame_h
 
-    last_drive      = None
-    last_send_time  = 0.0
-    last_status     = ''
-    last_face_time  = 0.0
-    last_box        = None
-    face_streak     = 0   # consecutive frames with a confirmed face
+    last_drive = None
+    last_send_time = 0.0
+    last_status = ''
+    last_face_time = 0.0
+    last_box = None
+    face_streak = 0
 
     def send_drive(v, r):
         nonlocal last_drive, last_send_time
