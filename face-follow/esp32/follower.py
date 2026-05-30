@@ -4,8 +4,8 @@ import time
 from machine import UART, Pin
 
 # ── WiFi (phone hotspot) ──────────────────────────────────────────────────────
-WIFI_SSID = "Pierce's iPhone 15 Pro"      # change to your phone hotspot name
-WIFI_PASS = "DownloadTimely"     # change to your phone hotspot password
+WIFI_SSID = "Dale\u2019s iPhone"      # change to your phone hotspot name
+WIFI_PASS = "kittenflower123"     # change to your phone hotspot password
 CMD_PORT  = 9000
 WATCHDOG_MS = 1000   # stop Roomba if no command received for this long
 
@@ -55,17 +55,20 @@ def beep(slot, notes):
 BOOT_SONG    = [(60, 16), (67, 24)]
 CONNECT_SONG = [(72, 8), (76, 8), (79, 12)]
 
+sta = network.WLAN(network.STA_IF)
+
 def connect_wifi():
-    # Tear down both interfaces cleanly before touching STA
     ap = network.WLAN(network.AP_IF)
     ap.active(False)
     time.sleep_ms(300)
 
-    sta = network.WLAN(network.STA_IF)
     sta.active(False)
     time.sleep_ms(300)
     sta.active(True)
     time.sleep_ms(500)
+
+    # Disable power saving so the radio stays up between commands
+    sta.config(pm=network.WLAN.PM_NONE)
 
     if sta.isconnected():
         sta.disconnect()
@@ -112,20 +115,35 @@ udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 udp.bind(('0.0.0.0', CMD_PORT))
 udp.setblocking(False)
 
-last_cmd_ms = time.ticks_ms()
-stopped     = False
+last_cmd_ms  = time.ticks_ms()
+last_ping_ms = time.ticks_ms()
+PING_MS      = 500   # send a keep-alive byte every 500 ms to hold the hotspot link
+stopped      = False
+mac_addr     = None
 
 while True:
     now_ms = time.ticks_ms()
 
+    # Reconnect WiFi if dropped
+    if not sta.isconnected():
+        drive(0)
+        print("WiFi dropped — reconnecting...")
+        try:
+            connect_wifi()
+            print("WiFi restored.")
+        except OSError as e:
+            print("Reconnect failed:", e)
+            time.sleep(2)
+        continue
+
     # Receive drive command
     try:
-        data, _ = udp.recvfrom(64)
+        data, addr = udp.recvfrom(64)
+        mac_addr = addr
         line = data.decode().strip()
         last_cmd_ms = now_ms
         stopped = False
         if line == 'C':
-            # Re-enter Full mode in case Roomba dropped to Passive
             start()
             time.sleep_ms(100)
             beep(1, CONNECT_SONG)
@@ -134,10 +152,17 @@ while True:
             parts = line.split()
             if len(parts) == 2:
                 v, r = int(parts[0]), int(parts[1])
-                print("CMD:", v, r)
                 drive(v, r)
     except OSError:
         pass
+
+    # Keep-alive: send a byte back to the Mac so the hotspot NAT stays open
+    if mac_addr and time.ticks_diff(now_ms, last_ping_ms) >= PING_MS:
+        last_ping_ms = now_ms
+        try:
+            udp.sendto(b'.\n', mac_addr)
+        except OSError:
+            pass
 
     # Watchdog — stop if Mac goes silent for >1 s
     if not stopped and time.ticks_diff(now_ms, last_cmd_ms) > WATCHDOG_MS:
