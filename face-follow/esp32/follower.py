@@ -115,10 +115,8 @@ udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 udp.bind(('0.0.0.0', CMD_PORT))
 udp.setblocking(False)
 
-last_cmd_ms  = time.ticks_ms()
 last_ping_ms = time.ticks_ms()
 PING_MS      = 500   # send a keep-alive byte every 500 ms to hold the hotspot link
-stopped      = False
 mac_addr     = None
 
 while True:
@@ -141,8 +139,6 @@ while True:
         data, addr = udp.recvfrom(64)
         mac_addr = addr
         line = data.decode().strip()
-        last_cmd_ms = now_ms
-        stopped = False
         if line == 'C':
             start()
             time.sleep_ms(100)
@@ -163,11 +159,5 @@ while True:
             udp.sendto(b'.\n', mac_addr)
         except OSError:
             pass
-
-    # Watchdog — stop if Mac goes silent for >1 s
-    if not stopped and time.ticks_diff(now_ms, last_cmd_ms) > WATCHDOG_MS:
-        drive(0)
-        stopped = True
-        print("Watchdog: no command, stopped.")
 
     time.sleep_ms(5)
