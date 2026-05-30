@@ -6,9 +6,9 @@ from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
-from RekognitionController import check_for_phone
+from RekognitionController import check_for_phone, check_for_distraction
 from BoxController import upload_to_box
-from EmailController import send_alert_email
+from EmailController import send_alert_email, send_distraction_email
 
 CAMERA_INDEX = int(os.getenv('CAMERA_INDEX', '1'))
 CHECK_INTERVAL = float(os.getenv('CHECK_INTERVAL', '2.0'))  # seconds between Rekognition calls
@@ -26,6 +26,7 @@ def main():
     last_check = 0.0
     last_alert = 0.0
     phone_detected = False
+    distraction_detected = False
 
     while True:
         ret, frame = cap.read()
@@ -39,6 +40,7 @@ def main():
             last_check = now
             try:
                 phone_detected = check_for_phone(frame)
+                distraction_detected = check_for_distraction(frame)
             except Exception as e:
                 print(f"Rekognition error: {e}")
 
@@ -57,8 +59,30 @@ def main():
                 except Exception as e:
                     print(f"Alert failed: {e}")
 
-        color = (0, 0, 255) if phone_detected else (0, 255, 0)
-        label = "PHONE DETECTED!" if phone_detected else "Monitoring..."
+            if distraction_detected and (now - last_alert) >= COOLDOWN:
+                last_alert = now
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                filename = f"distraction_caught_{timestamp}.jpg"
+                _, buf = cv2.imencode('.jpg', frame)
+                image_bytes = buf.tobytes()
+
+                print(f"DISTRACTION DETECTED — uploading to Box and alerting...")
+                try:
+                    box_url = upload_to_box(image_bytes, filename)
+                    send_distraction_email(filename, box_url)
+                    print(f"Alert sent. Box URL: {box_url}")
+                except Exception as e:
+                    print(f"Alert failed: {e}")
+
+        if phone_detected:
+            color = (0, 0, 255)
+            label = "PHONE DETECTED!"
+        elif distraction_detected:
+            color = (0, 165, 255)
+            label = "DISTRACTION DETECTED!"
+        else:
+            color = (0, 255, 0)
+            label = "Monitoring..."
         cv2.putText(frame, label, (10, 35), cv2.FONT_HERSHEY_SIMPLEX, 1.1, color, 2)
         cv2.imshow('RoombaRat', frame)
 
