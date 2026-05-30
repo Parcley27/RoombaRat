@@ -1,0 +1,4 @@
+boto3
+opencv-python
+boxsdk<4
+python-dotenv

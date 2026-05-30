@@ -1,19 +1,22 @@
 import boto3
-import base64
 import cv2
+import os
 
-rekognition = boto3.client('rekognition', region_name='us-east-1')
+rekognition = boto3.client('rekognition', region_name=os.getenv('AWS_REGION', 'us-east-2'))
+
+PHONE_LABELS = {'Cell Phone', 'Mobile Phone', 'Phone', 'Smartphone'}
+MIN_CONFIDENCE = float(os.getenv('MIN_CONFIDENCE', '70'))
+
 
 def check_for_phone(frame):
-    # encode opencv frame as JPEG bytes
     _, buffer = cv2.imencode('.jpg', frame)
     image_bytes = buffer.tobytes()
-    
+
     response = rekognition.detect_labels(
         Image={'Bytes': image_bytes},
         MaxLabels=20,
-        MinConfidence=70  # tune this
+        MinConfidence=MIN_CONFIDENCE,
     )
-    
-    labels = [label['Name'] for label in response['Labels']]
-    return 'Cell Phone' in labels
+
+    detected = {label['Name'] for label in response['Labels']}
+    return bool(detected & PHONE_LABELS)
