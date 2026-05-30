@@ -1,12 +1,11 @@
-import network
-import socket
+import select
+import sys
 import time
 from machine import UART, Pin
 
-AP_SSID     = 'Roomba'
-AP_PASSWORD = 'roomba123'
-CMD_PORT    = 9000
-WATCHDOG_MS = 1000   # stop Roomba if no command received for this long
+# Communicates with the Mac over USB serial (sys.stdin / sys.stdout).
+# No WiFi needed — plug the USB-C cable in and run the Mac script.
+# UART1 (GPIO25/26) is still dedicated to the Roomba OI.
 
 BRC_PIN = 4
 UART_TX = 25
@@ -26,11 +25,42 @@ def wake():
     brc.value(1)
     time.sleep_ms(100)
 
+def flush():
+    while uart.any():
+        uart.read(uart.any())
+
+def oi_mode():
+    """Return current OI mode byte: 0=off 1=passive 2=safe 3=full, or -1 on timeout."""
+    flush()
+    _send([149, 1, 35])   # Query List: packet 35 = OI Mode
+    time.sleep_ms(50)
+    d = uart.read(1)
+    return d[0] if d else -1
+
 def start():
-    _send([128])
-    time.sleep_ms(200)
-    _send([132])
-    time.sleep_ms(200)
+    """Send START + FULL, retrying until the Roomba confirms Full mode (mode byte == 3)."""
+    for attempt in range(5):
+        flush()
+        _send([128])          # START  → Passive
+        time.sleep_ms(300)
+        _send([132])          # FULL
+        time.sleep_ms(500)
+        mode = oi_mode()
+        print("OI mode after attempt {}: {}".format(attempt + 1, mode))
+        if mode == 3:
+            print("Roomba in Full mode.")
+            return
+        # Not in Full yet — try Safe first as a stepping stone
+        _send([131])
+        time.sleep_ms(300)
+        _send([132])
+        time.sleep_ms(500)
+        mode = oi_mode()
+        if mode in (2, 3):
+            print("Roomba in mode {} after Safe→Full.".format(mode))
+            return
+        time.sleep_ms(500)
+    print("WARNING: could not confirm Full mode — commands may be ignored.")
 
 def drive(velocity, radius=-32768):
     v = velocity & 0xFFFF
@@ -54,66 +84,40 @@ def beep(slot, notes):
 BOOT_SONG    = [(60, 16), (67, 24)]
 CONNECT_SONG = [(72, 8), (76, 8), (79, 12)]
 
-def start_ap():
-    # Disable station mode to avoid interference
-    sta = network.WLAN(network.STA_IF)
-    sta.active(False)
-
-    ap = network.WLAN(network.AP_IF)
-    ap.active(True)
-    ap.config(ssid=AP_SSID, password=AP_PASSWORD,
-              authmode=network.AUTH_WPA_WPA2_PSK)
-    # ESP32 AP is always reachable at 192.168.4.1
-    print("AP started — connect Mac to WiFi:", AP_SSID)
-    print("ESP32 IP: 192.168.4.1")
-    return ap
-
 # --- boot ---
-ap = start_ap()
-
-print("Waking Roomba...")
+# Press the CLEAN button on the Roomba BEFORE running this script if
+# starting from fully powered-off state — BRC alone can't turn it on.
+print("Waking Roomba (make sure CLEAN was pressed to power it on)...")
 wake()
-time.sleep_ms(1000)
+time.sleep_ms(2000)   # give Roomba time to finish its boot sequence
 start()
-time.sleep_ms(500)
 beep(0, BOOT_SONG)
-print("Ready.")
+print("Ready. Waiting for commands over USB serial.")
 
-udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-udp.bind(('0.0.0.0', CMD_PORT))
-udp.setblocking(False)
-
-last_cmd_ms = time.ticks_ms()
-stopped     = False
+rx_buf = b""
 
 while True:
-    now_ms = time.ticks_ms()
-
-    # Receive drive command
-    try:
-        data, _ = udp.recvfrom(64)
-        line = data.decode().strip()
-        last_cmd_ms = now_ms
-        stopped = False
-        if line == 'C':
-            # Re-enter Full mode in case Roomba dropped to Passive
-            start()
-            time.sleep_ms(100)
-            beep(1, CONNECT_SONG)
-            print("Mac connected, Roomba in Full mode.")
-        else:
-            parts = line.split()
-            if len(parts) == 2:
-                v, r = int(parts[0]), int(parts[1])
-                print("CMD:", v, r)
-                drive(v, r)
-    except OSError:
-        pass
-
-    # Watchdog — stop if Mac goes silent for >1 s
-    if not stopped and time.ticks_diff(now_ms, last_cmd_ms) > WATCHDOG_MS:
-        drive(0)
-        stopped = True
-        print("Watchdog: no command, stopped.")
+    # Non-blocking read from USB serial (Mac → ESP32)
+    r, _, _ = select.select([sys.stdin], [], [], 0)
+    if r:
+        chunk = sys.stdin.buffer.read(64)
+        if chunk:
+            rx_buf += chunk
+            while b"\n" in rx_buf:
+                line, rx_buf = rx_buf.split(b"\n", 1)
+                line = line.strip().decode("ascii", "ignore")
+                if line == "C":
+                    start()
+                    time.sleep_ms(100)
+                    beep(1, CONNECT_SONG)
+                    print("Mac connected.")
+                else:
+                    parts = line.split()
+                    if len(parts) == 2:
+                        try:
+                            v, r_val = int(parts[0]), int(parts[1])
+                            drive(v, r_val)
+                        except ValueError:
+                            pass
 
     time.sleep_ms(5)
