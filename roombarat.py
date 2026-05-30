@@ -1,19 +1,3 @@
-"""
-roombarat.py — Integrated Roomba Phone Patrol Orchestrator
-
-State machine:
-  SEARCHING  → spin CCW slowly until a face is confirmed
-  FOLLOWING  → drive toward the nearest (largest) face
-  INSPECTING → stop at the face, call Rekognition to check for phone
-               • phone found  → snap pic, upload Box, email, spin right, SEARCHING
-               • no phone     → spin right briefly, SEARCHING
-
-ESP32 firmware expected: face-follow/esp32/follower.py
-  AP SSID "Roomba" / password "roomba123"
-  UDP port 9000, commands: "v r\\n"  (velocity + radius, OI DRIVE style)
-                            "C\\n"   (connect / re-enter Full mode)
-"""
-
 import cv2
 import os
 import socket
@@ -28,47 +12,41 @@ from RekognitionController import check_for_phone
 from BoxController import upload_to_box
 from EmailController import send_alert_email
 
-# ── Network ───────────────────────────────────────────────────────────────────
-ESP32_IP   = os.getenv('ESP32_IP', '192.168.4.1')
-CMD_PORT   = 9000
-CMD_INTERVAL = 0.10   # min seconds between repeated identical commands
+# setup
+ESP32_IP = os.getenv('ESP32_IP', '192.168.4.1')
+CMD_PORT = 9000
+CMD_INTERVAL = 0.10
 
-# ── Camera ────────────────────────────────────────────────────────────────────
-CAMERA_INDEX    = int(os.getenv('CAMERA_INDEX', '0'))
-CAMERA_ROTATE   = int(os.getenv('CAMERA_ROTATE', '0'))   # 0 / 90 / -90 / 180
+CAMERA_INDEX = int(os.getenv('CAMERA_INDEX', '0'))
+CAMERA_ROTATE = int(os.getenv('CAMERA_ROTATE', '0'))
 
-# ── Face tracking ─────────────────────────────────────────────────────────────
-CONFIRM_FRAMES  = 2      # consecutive frames needed to lock onto a face
-FACE_TIMEOUT    = 0.5    # seconds before face is considered lost
+CONFIRM_FRAMES = 2
+FACE_TIMEOUT = 0.5
 
-TARGET_AREA_MIN = 0.03   # below this → drive forward (too far)
-AT_FACE_AREA    = 0.06   # at or above this → stop and inspect
-SPIN_THRESHOLD  = 0.40   # large horiz error → spin in place; smaller → curve
+TARGET_AREA_MIN = 0.03
+AT_FACE_AREA = 0.06
+SPIN_THRESHOLD = 0.40
 
-FORWARD_SPEED   = 180    # mm/s
-SEARCH_SPEED    = 60     # mm/s CCW spin while searching
-SPIN_RIGHT_SPD  = 80     # mm/s CW spin used to move past an inspected person
+FORWARD_SPEED = 180
+SEARCH_SPEED = 60
+SPIN_RIGHT_SPD = 80
 
-# ── Inspection / alerting ─────────────────────────────────────────────────────
-ALERT_COOLDOWN  = 30.0   # seconds before another email is sent
-SPIN_AWAY_SECS  = 2.5    # seconds to spin right after inspecting a non-phone person
-INSPECT_FRAMES  = 3      # frames to wait (stabilise) before calling Rekognition
+ALERT_COOLDOWN = 30.0
+SPIN_AWAY_SECS = 2.5
+INSPECT_FRAMES = 3
 
-# ── OI drive constants ────────────────────────────────────────────────────────
 STRAIGHT = -32768
-CW_SPIN  = -1    # clockwise  (right)
-CCW_SPIN =  1    # counter-clockwise (left)
+CW_SPIN = -1
+CCW_SPIN = 1
 
-# ── States ────────────────────────────────────────────────────────────────────
+# inspector states
 SEARCHING  = 'SEARCHING'
 FOLLOWING  = 'FOLLOWING'
 INSPECTING = 'INSPECTING'
 
-# ── Face detector ─────────────────────────────────────────────────────────────
 face_cascade = cv2.CascadeClassifier(
     cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
 )
-
 
 def detect_largest_face(frame):
     gray  = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -81,11 +59,11 @@ def detect_largest_face(frame):
 
 
 def compute_drive(horiz_err, area_ratio):
-    """Return (velocity, radius) for Roomba OI DRIVE opcode."""
+    """returns velocity and radius for Roomba OI DRIVE opcode."""
     if abs(horiz_err) >= SPIN_THRESHOLD:
         return SEARCH_SPEED, (CW_SPIN if horiz_err > 0 else CCW_SPIN)
 
-    t     = min(abs(horiz_err) / SPIN_THRESHOLD, 1.0)
+    t = min(abs(horiz_err) / SPIN_THRESHOLD, 1.0)
     r_mag = int(800 * (1 - t) + 200 * t)
     radius = -r_mag if horiz_err > 0 else r_mag
 
@@ -104,7 +82,7 @@ def rotate_frame(frame, deg):
 
 
 def main():
-    # ── Connect to ESP32 ──────────────────────────────────────────────────────
+    # connect to esp32
     sock     = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     esp_addr = (ESP32_IP, CMD_PORT)
 
@@ -112,26 +90,24 @@ def main():
     print(f"Sent connect to ESP32 at {ESP32_IP}:{CMD_PORT} — listen for Roomba beep.")
     time.sleep(0.5)
 
-    # ── Open camera ───────────────────────────────────────────────────────────
     cap = cv2.VideoCapture(CAMERA_INDEX)
     if not cap.isOpened():
         print(f"Could not open camera {CAMERA_INDEX}. Try setting CAMERA_INDEX in .env")
         sys.exit(1)
 
-    frame_w   = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    frame_h   = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    frame_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    frame_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     frame_area = frame_w * frame_h
 
-    # ── State ─────────────────────────────────────────────────────────────────
-    state          = SEARCHING
-    face_streak    = 0
+    state = SEARCHING
+    face_streak = 0
     last_face_time = 0.0
-    last_box       = None
-    last_drive     = None
-    last_send_t    = 0.0
-    last_alert_t   = 0.0      # last time an email alert was sent
-    inspect_frames = 0        # frames accumulated in INSPECTING state
-    spin_until     = 0.0      # time.time() deadline for spin-away
+    last_box = None
+    last_drive = None
+    last_send_t = 0.0
+    last_alert_t = 0.0
+    inspect_frames = 0
+    spin_until = 0.0
 
     def send_drive(v, r):
         nonlocal last_drive, last_send_t
@@ -157,7 +133,7 @@ def main():
             frame = rotate_frame(raw_frame, CAMERA_ROTATE)
             now   = time.time()
 
-            # ── Face detection (runs every frame) ─────────────────────────────
+            # facial rec
             box = detect_largest_face(frame)
 
             if box is not None:
@@ -170,8 +146,6 @@ def main():
                 last_box       = box
 
             face_active = (now - last_face_time) < FACE_TIMEOUT
-
-            # ── State transitions & drive commands ────────────────────────────
 
             if state == SEARCHING:
                 send_drive(SEARCH_SPEED, CCW_SPIN)
@@ -198,7 +172,7 @@ def main():
                 cv2.circle(frame, (cx, y + h // 2), 5, (0, 255, 0), -1)
 
                 if area_ratio >= AT_FACE_AREA:
-                    # Close enough — stop and inspect
+                    # face is close enoguh for phone rec
                     send_drive(0, STRAIGHT)
                     state          = INSPECTING
                     inspect_frames = 0
@@ -214,14 +188,12 @@ def main():
             elif state == INSPECTING:
                 send_drive(0, STRAIGHT)
 
-                # Wait a few frames so the Roomba is fully stopped and the
-                # frame is sharp before we spend a Rekognition API call.
                 inspect_frames += 1
                 label  = f"INSPECTING ({inspect_frames}/{INSPECT_FRAMES})"
                 colour = (0, 255, 255)
 
                 if inspect_frames >= INSPECT_FRAMES:
-                    # Grab fresh frame for the Rekognition call
+
                     ret2, snap = cap.read()
                     if ret2:
                         snap = rotate_frame(snap, CAMERA_ROTATE)
@@ -237,9 +209,9 @@ def main():
 
                     if phone_found and (now - last_alert_t) >= ALERT_COOLDOWN:
                         last_alert_t = now
-                        timestamp    = datetime.now().strftime('%Y%m%d_%H%M%S')
-                        filename     = f"phone_caught_{timestamp}.jpg"
-                        _, buf       = cv2.imencode('.jpg', snap)
+                        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                        filename = f"phone_caught_{timestamp}.jpg"
+                        _, buf = cv2.imencode('.jpg', snap)
 
                         print(f"PHONE DETECTED — uploading to Box...")
                         try:
@@ -254,21 +226,18 @@ def main():
                         cv2.putText(frame, label, (10, 28),
                                     cv2.FONT_HERSHEY_SIMPLEX, 0.9, colour, 2)
                         cv2.imshow("RoombaRat", frame)
-                        cv2.waitKey(1000)   # show "caught" screen for 1 s
+                        cv2.waitKey(1000)
 
                     elif phone_found:
                         print("Phone found but still in cooldown — skipping alert.")
                     else:
                         print("No phone — moving to next person.")
 
-                    # Spin right to move past this person then go searching
                     spin_until = time.time() + SPIN_AWAY_SECS
-                    state      = SEARCHING
-                    last_box   = None
+                    state = SEARCHING
+                    last_box = None
                     face_streak = 0
 
-                    # Drain remaining spin-away time in a mini-loop so we
-                    # don't block the main loop for 2+ seconds.
                     while time.time() < spin_until:
                         send_drive(SPIN_RIGHT_SPD, CW_SPIN)
                         ret_s, fr_s = cap.read()
@@ -283,7 +252,6 @@ def main():
                     print("Spin-away done → SEARCHING")
                     continue
 
-            # ── HUD overlay ───────────────────────────────────────────────────
             cv2.putText(frame, label, (10, 28),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.72, colour, 2)
             v_log, r_log = last_drive if last_drive else (0, 0)
@@ -298,7 +266,7 @@ def main():
         pass
     finally:
         try:
-            sock.sendto(b'0 -32768\n', esp_addr)   # stop
+            sock.sendto(b'0 -32768\n', esp_addr)
         except OSError:
             pass
         sock.close()
