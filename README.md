@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="Branding/full.png" width="220" alt="RoombaRat logo" />
+  <img src="Branding/horizontal.png" width="620" alt="RoombaRat logo" />
 </p>
 
 # RoombaRat
