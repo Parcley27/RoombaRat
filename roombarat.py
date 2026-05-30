@@ -1,8 +1,9 @@
 import cv2
 import os
-import socket
 import sys
 import time
+import serial
+import serial.tools.list_ports
 from datetime import datetime
 from dotenv import load_dotenv
 
@@ -13,8 +14,8 @@ from BoxController import upload_to_box
 from EmailController import send_alert_email
 
 # setup
-ESP32_IP = os.getenv('ESP32_IP', '192.168.4.1')
-CMD_PORT = 9000
+SERIAL_PORT  = os.getenv('SERIAL_PORT', '')
+BAUD_RATE    = 115200
 CMD_INTERVAL = 0.10
 
 CAMERA_INDEX = int(os.getenv('CAMERA_INDEX', '0'))
@@ -81,13 +82,27 @@ def rotate_frame(frame, deg):
     return frame
 
 
-def main():
-    # connect to esp32
-    sock     = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    esp_addr = (ESP32_IP, CMD_PORT)
+def find_serial_port():
+    for p in serial.tools.list_ports.comports():
+        desc = (p.description or '').lower()
+        if any(k in desc for k in ('cp210', 'ch340', 'uart', 'esp32', 'usb serial')):
+            return p.device
+    return None
 
-    sock.sendto(b'C\n', esp_addr)
-    print(f"Sent connect to ESP32 at {ESP32_IP}:{CMD_PORT} — listen for Roomba beep.")
+
+def main():
+    port = SERIAL_PORT or find_serial_port()
+    if not port:
+        print("Could not find ESP32 serial port. Set SERIAL_PORT=/dev/cu.usbserial-XXXX in .env")
+        print("Available ports:")
+        for p in serial.tools.list_ports.comports():
+            print(f"  {p.device}  {p.description}")
+        sys.exit(1)
+
+    print(f"Opening serial port {port}...")
+    ser = serial.Serial(port, BAUD_RATE, timeout=0)
+    ser.write(b'C\n')
+    print("Sent connect — listen for Roomba beep.")
     time.sleep(0.5)
 
     cap = cv2.VideoCapture(CAMERA_INDEX)
@@ -114,11 +129,11 @@ def main():
         now = time.time()
         if (v, r) != last_drive or now - last_send_t >= CMD_INTERVAL:
             try:
-                sock.sendto(f"{v} {r}\n".encode(), esp_addr)
+                ser.write(f"{v} {r}\n".encode())
                 last_drive = (v, r)
                 last_send_t = now
-            except OSError as e:
-                print(f"Network error: {e}")
+            except serial.SerialException as e:
+                print(f"Serial error: {e}")
 
     print("RoombaRat patrol started. Press 'q' to quit.")
     print(f"State: {state}")
@@ -266,10 +281,10 @@ def main():
         pass
     finally:
         try:
-            sock.sendto(b'0 -32768\n', esp_addr)
-        except OSError:
+            ser.write(b'0 -32768\n')
+        except serial.SerialException:
             pass
-        sock.close()
+        ser.close()
         cap.release()
         cv2.destroyAllWindows()
         print("RoombaRat stopped.")
