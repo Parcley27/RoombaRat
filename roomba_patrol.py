@@ -13,7 +13,7 @@ load_dotenv(override=True)
 
 # Continuity Camera on Mac is typically index 1 (index 0 = built-in FaceTime camera).
 # Set CAMERA_INDEX and CAMERA_ROTATE in .env to match your setup.
-CAMERA_INDEX   = int(os.getenv('CAMERA_INDEX', '1'))
+CAMERA_INDEX   = 0
 CAMERA_ROTATE  = int(os.getenv('CAMERA_ROTATE', '-90'))  # Continuity Camera is sideways
 FACE_TIMEOUT   = 0.5 
 CMD_INTERVAL   = 0.10
@@ -185,9 +185,21 @@ def main():
         print(f"Could not open camera {args.camera}.")
         sys.exit(1)
 
-    frame_w    = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    frame_h    = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    frame_area = frame_w * frame_h
+    # Continuity Camera on Mac returns black/empty frames while it warms up.
+    # Drain until we get a real frame so frame dimensions are correct.
+    print("Waiting for camera feed...", end="", flush=True)
+    frame_w = frame_h = frame_area = 0
+    for _ in range(60):
+        ret, _f = cap.read()
+        if ret and _f is not None and _f.shape[0] > 0:
+            frame_h, frame_w = _f.shape[:2]
+            frame_area = frame_w * frame_h
+            break
+        time.sleep(0.05)
+    else:
+        print("\nCamera did not produce a frame after 3s. Try a different CAMERA_INDEX.")
+        sys.exit(1)
+    print(f" {frame_w}x{frame_h}")
 
     last_drive     = None
     last_send_time = 0.0
@@ -258,7 +270,8 @@ def main():
     try:
         while True:
             ret, frame = cap.read()
-            if not ret:
+            if not ret or frame is None:
+                cv2.waitKey(1)   # keep the window event loop alive
                 continue
             frame = rotate_frame(frame, CAMERA_ROTATE)
             now = time.time()
