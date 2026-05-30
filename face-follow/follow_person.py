@@ -1,36 +1,48 @@
 import cv2
-import socket
-import time
+import os
 import sys
+import time
 import argparse
+import serial
+import serial.tools.list_ports
+from dotenv import load_dotenv
+
+load_dotenv(override=True)
 
 # --- tuning ---
 CAMERA_INDEX = 0
-FACE_TIMEOUT = 0.5    # seconds to coast on last known position before searching
-CMD_INTERVAL = 0.10   # min seconds between sending repeated identical commands
+FACE_TIMEOUT = 0.5
+CMD_INTERVAL = 0.10
 
-TARGET_AREA_MIN = 0.03   # drive forward below this (face too small = too far)
-TARGET_AREA_MAX = 0.07   # back up above this (face too large = too close)
-TURN_THRESHOLD = 0.08   # horizontal dead zone — no correction below this
-SPIN_THRESHOLD = 0.40   # in-place spin above this, curved drive below
+TARGET_AREA_MIN = 0.03
+TARGET_AREA_MAX = 0.07
+SPIN_THRESHOLD  = 0.40
 
-FORWARD_SPEED = 180    # mm/s base forward speed
-SEARCH_SPEED = 60     # mm/s spin speed when no face detected
-BACKUP_SPEED = -80    # mm/s when too close
+FORWARD_SPEED = 180
+SEARCH_SPEED  = 60
+BACKUP_SPEED  = -80
 
 STRAIGHT = -32768
-CW_SPIN = -1
-CCW_SPIN = 1
+CW_SPIN  = -1
+CCW_SPIN =  1
 
-CMD_PORT = 9000
-CONFIRM_FRAMES = 2 # make tracking more stable
+CONFIRM_FRAMES = 2
+
+SERIAL_PORT = os.getenv('SERIAL_PORT', '')   # e.g. /dev/cu.usbserial-0001
+BAUD_RATE   = 115200
 
 face_cascade = cv2.CascadeClassifier(
     cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
 )
 
-def discover_esp32():
-    return '192.168.4.1'
+
+def find_serial_port():
+    """Return first USB-serial port that looks like an ESP32."""
+    for p in serial.tools.list_ports.comports():
+        desc = (p.description or '').lower()
+        if any(k in desc for k in ('cp210', 'ch340', 'uart', 'esp32', 'usb serial')):
+            return p.device
+    return None
 
 
 def detect_largest_face(frame):
@@ -44,46 +56,38 @@ def detect_largest_face(frame):
 
 
 def compute_drive(horiz_err, area_ratio):
-    # Too close — back up
     if area_ratio > TARGET_AREA_MAX:
         return BACKUP_SPEED, STRAIGHT
-
-    # Large error — spin in place to re-centre before driving
     if abs(horiz_err) >= SPIN_THRESHOLD:
         return 100, (CW_SPIN if horiz_err > 0 else CCW_SPIN)
-
-    # Proportional curve forward
     t      = min(abs(horiz_err) / SPIN_THRESHOLD, 1.0)
-    r_mag  = int(800 * (1 - t) + 200 * t)   # 800mm (gentle) → 200mm (sharp)
+    r_mag  = int(800 * (1 - t) + 200 * t)
     radius = -r_mag if horiz_err > 0 else r_mag
-
-    # Always drive forward — faster when far, slower (but never stopped) when close
-    if area_ratio < TARGET_AREA_MIN:
-        speed = FORWARD_SPEED
-    else:
-        speed = 100   # at target distance: slow crawl so it stays engaged
-
+    speed  = FORWARD_SPEED if area_ratio < TARGET_AREA_MIN else 100
     return speed, radius
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--host',   default=None, help='ESP32 IP (skip auto-discovery)')
+    parser.add_argument('--port',   default=None, help='Serial port (overrides SERIAL_PORT in .env)')
     parser.add_argument('--camera', type=int, default=CAMERA_INDEX)
     args = parser.parse_args()
 
-    esp32_ip = args.host or discover_esp32()
-    if esp32_ip is None:
-        print("Roomba not found. Make sure the ESP32 is on the same WiFi network.")
-        print("Or specify its IP with:  --host <ip>")
+    port = args.port or SERIAL_PORT or find_serial_port()
+    if not port:
+        print("Could not find ESP32 serial port.")
+        print("Plug in the USB-C cable, then either:")
+        print("  set SERIAL_PORT=/dev/cu.usbserial-XXXX in .env")
+        print("  or pass --port /dev/cu.usbserial-XXXX")
+        print("Available ports:")
+        for p in serial.tools.list_ports.comports():
+            print(f"  {p.device}  {p.description}")
         sys.exit(1)
-    print(f"Roomba found at {esp32_ip}")
 
-    cmd_sock   = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    esp32_addr = (esp32_ip, CMD_PORT)
-
-    cmd_sock.sendto(b'C\n', esp32_addr)
-    print("Connected — listen for Roomba connect sound.")
+    print(f"Opening serial port {port}...")
+    ser = serial.Serial(port, BAUD_RATE, timeout=0)
+    ser.write(b'C\n')
+    print("Sent connect — listen for Roomba beep.")
     time.sleep(0.5)
 
     cap = cv2.VideoCapture(args.camera)
@@ -91,27 +95,27 @@ def main():
         print("Could not open webcam.")
         sys.exit(1)
 
-    frame_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    frame_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    frame_w    = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    frame_h    = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     frame_area = frame_w * frame_h
 
-    last_drive      = None
-    last_send_time  = 0.0
-    last_status     = ''
-    last_face_time  = 0.0
-    last_box        = None
-    face_streak     = 0   # consecutive frames with a confirmed face
+    last_drive     = None
+    last_send_time = 0.0
+    last_status    = ''
+    last_face_time = 0.0
+    last_box       = None
+    face_streak    = 0
 
     def send_drive(v, r):
         nonlocal last_drive, last_send_time
         now = time.time()
         if (v, r) != last_drive or now - last_send_time >= CMD_INTERVAL:
             try:
-                cmd_sock.sendto(f"{v} {r}\n".encode(), esp32_addr)
+                ser.write(f"{v} {r}\n".encode())
                 last_drive     = (v, r)
                 last_send_time = now
-            except OSError as e:
-                print(f"Network error ({e}) — waiting for ESP32 to reconnect...")
+            except serial.SerialException as e:
+                print(f"Serial error: {e}")
 
     try:
         while True:
@@ -136,33 +140,32 @@ def main():
             if not face_active:
                 send_drive(SEARCH_SPEED, CCW_SPIN)
                 last_box = None
-                label = "Searching..."
+                label  = "Searching..."
                 colour = (0, 165, 255)
             else:
                 x, y, w, h = last_box
-                cx = x + w // 2
+                cx         = x + w // 2
                 area_ratio = (w * h) / frame_area
-                horiz_err = (cx - frame_w / 2) / (frame_w / 2)
+                horiz_err  = (cx - frame_w / 2) / (frame_w / 2)
 
                 v, r = compute_drive(horiz_err, area_ratio)
                 send_drive(v, r)
 
                 cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
                 cv2.circle(frame, (cx, y + h // 2), 5, (0, 255, 0), -1)
-                cv2.putText(frame, f"area={area_ratio:.3f}  err={horiz_err:+.2f}  v={v} r={r}", (10, 55), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
+                cv2.putText(frame, f"area={area_ratio:.3f}  err={horiz_err:+.2f}  v={v} r={r}",
+                            (10, 55), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
 
                 if area_ratio > TARGET_AREA_MAX:
                     label = f"BACK UP  area={area_ratio:.3f}"
-                elif v == 0 and r == STRAIGHT:
-                    label = f"HOLD  err={horiz_err:+.2f}"
-                elif r in (CW_SPIN, CCW_SPIN) and v < 100:
+                elif r in (CW_SPIN, CCW_SPIN):
                     label = f"SPIN {'RIGHT' if r == CW_SPIN else 'LEFT'}  err={horiz_err:+.2f}"
                 elif r == STRAIGHT:
                     label = f"FORWARD  area={area_ratio:.3f}"
                 else:
                     label = f"CURVE {'RIGHT' if r < 0 else 'LEFT'}  err={horiz_err:+.2f}"
 
-                colour = (0, 255, 0) if box is not None else (0, 165, 255)
+                colour = (0, 255, 0)
 
             v_log, r_log = last_drive if last_drive else (0, 0)
             status = f"{label}  [v={v_log} r={r_log}]"
@@ -170,8 +173,7 @@ def main():
                 print(status)
                 last_status = status
 
-            cv2.putText(frame, label, (10, 28),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.72, colour, 2)
+            cv2.putText(frame, label, (10, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.72, colour, 2)
             cv2.imshow("Roomba Face Follower", frame)
 
             if cv2.waitKey(1) & 0xFF == ord('q'):
@@ -179,10 +181,10 @@ def main():
 
     finally:
         try:
-            cmd_sock.sendto(b'0 0\n', esp32_addr)
-        except OSError:
+            ser.write(b'0 -32768\n')
+        except serial.SerialException:
             pass
-        cmd_sock.close()
+        ser.close()
         cap.release()
         cv2.destroyAllWindows()
         print("Stopped.")

@@ -11,6 +11,18 @@ uart = UART(1, baudrate=115200, tx=UART_TX, rx=UART_RX)
 def _send(data):
     uart.write(bytes(data))
 
+def flush():
+    while uart.any():
+        uart.read(uart.any())
+
+def oi_mode():
+    """Return OI mode byte: 0=off 1=passive 2=safe 3=full, or -1 on timeout."""
+    flush()
+    _send([149, 1, 35])
+    time.sleep_ms(50)
+    d = uart.read(1)
+    return d[0] if d else -1
+
 def wake():
     brc.value(1)
     time.sleep_ms(100)
@@ -20,10 +32,28 @@ def wake():
     time.sleep_ms(100)
 
 def start():
-    _send([128])
-    time.sleep_ms(200)
-    _send([132])
-    time.sleep_ms(200)
+    """Send START + FULL, retrying until the Roomba confirms Full mode."""
+    for attempt in range(5):
+        flush()
+        _send([128])
+        time.sleep_ms(300)
+        _send([132])
+        time.sleep_ms(500)
+        mode = oi_mode()
+        print("OI mode after attempt {}: {}".format(attempt + 1, mode))
+        if mode == 3:
+            print("Roomba in Full mode.")
+            return
+        _send([131])
+        time.sleep_ms(300)
+        _send([132])
+        time.sleep_ms(500)
+        mode = oi_mode()
+        if mode in (2, 3):
+            print("Roomba in mode {}.".format(mode))
+            return
+        time.sleep_ms(500)
+    print("WARNING: could not confirm Full mode — commands may be ignored.")
 
 # Motors opcode 138: bits 0=side brush, 1=vacuum, 2=main brush
 def set_clean_motors(side_brush=False, vacuum=False, main_brush=False):
@@ -80,6 +110,36 @@ def read_battery():
     else:
         print(f"Battery charge: {charge} mAh (capacity unknown)")
 
+CHARGING_STATES = {
+    0: 'Not charging',
+    1: 'Reconditioning',
+    2: 'Full charging',
+    3: 'Trickle charging',
+    4: 'Waiting',
+    5: 'Charging fault',
+}
+
+def monitor_charging():
+    print("Monitoring charge state — press Ctrl-C to stop.")
+    last = None
+    while True:
+        flush()
+        _send([149, 1, 21])   # packet 21 = Charging State
+        time.sleep_ms(50)
+        d = uart.read(1)
+        if d:
+            state = CHARGING_STATES.get(d[0], 'Unknown ({})'.format(d[0]))
+            charging = d[0] in (1, 2, 3)
+            label = 'CHARGING' if charging else 'NOT CHARGING'
+            msg = '[{}]  {}'.format(label, state)
+        else:
+            msg = '[NO RESPONSE]  Roomba not responding'
+        if msg != last:
+            print(msg)
+            last = msg
+        time.sleep_ms(500)
+
+
 def sound_menu():
     print("  Sounds:")
     names = list(SONGS.keys())
@@ -103,6 +163,7 @@ def menu():
     print("3. Wheels")
     print("4. Sound")
     print("5. Drive square (0.5m x 0.5m)")
+    print("6. Monitor charging (Ctrl-C to stop)")
     print("q. Quit")
     return input("Select: ").strip()
 
@@ -166,6 +227,12 @@ while True:
 
     elif choice == '5':
         drive_square()
+
+    elif choice == '6':
+        try:
+            monitor_charging()
+        except KeyboardInterrupt:
+            print("\nStopped monitoring.")
 
     elif choice == 'q':
         stop_all()
