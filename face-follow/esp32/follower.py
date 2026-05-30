@@ -4,8 +4,8 @@ import time
 from machine import UART, Pin
 
 # ── WiFi (phone hotspot) ──────────────────────────────────────────────────────
-WIFI_SSID = "YourHotspot"      # change to your phone hotspot name
-WIFI_PASS = "YourPassword"     # change to your phone hotspot password
+WIFI_SSID = "Dale's iPhone"      # change to your phone hotspot name
+WIFI_PASS = "kittenflower123"     # change to your phone hotspot password
 CMD_PORT  = 9000
 WATCHDOG_MS = 1000   # stop Roomba if no command received for this long
 
@@ -56,20 +56,30 @@ BOOT_SONG    = [(60, 16), (67, 24)]
 CONNECT_SONG = [(72, 8), (76, 8), (79, 12)]
 
 def connect_wifi():
+    # Tear down both interfaces cleanly before touching STA
     ap = network.WLAN(network.AP_IF)
     ap.active(False)
+    time.sleep_ms(300)
 
     sta = network.WLAN(network.STA_IF)
+    sta.active(False)
+    time.sleep_ms(300)
     sta.active(True)
+    time.sleep_ms(200)
+
+    if sta.isconnected():
+        sta.disconnect()
+        time.sleep_ms(200)
+
     sta.connect(WIFI_SSID, WIFI_PASS)
     print("Connecting to", WIFI_SSID, end="")
-    for _ in range(30):
+    for _ in range(40):
         if sta.isconnected():
             break
         time.sleep(0.5)
         print(".", end="")
     if not sta.isconnected():
-        raise OSError("WiFi failed — check SSID/password")
+        raise OSError("WiFi failed — check SSID/password and that hotspot is on")
     ip = sta.ifconfig()[0]
     print("\nConnected! ESP32 IP:", ip)
     print(">>> Set ESP32_IP =", ip, "in .env on the Mac <<<")
