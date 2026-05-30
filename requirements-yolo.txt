@@ -1,0 +1,3 @@
+# Optional — only needed for the local YOLO phone detector (--detector yolo).
+# Pulls in PyTorch (large). Install with:  pip install -r requirements-yolo.txt
+ultralytics
