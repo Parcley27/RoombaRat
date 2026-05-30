@@ -121,7 +121,6 @@ CHARGING_STATES = {
 
 def monitor_charging():
     print("Monitoring charge state — press Ctrl-C to stop.")
-    last = None
     while True:
         flush()
         _send([149, 1, 21])   # packet 21 = Charging State
@@ -134,9 +133,7 @@ def monitor_charging():
             msg = '[{}]  {}'.format(label, state)
         else:
             msg = '[NO RESPONSE]  Roomba not responding'
-        if msg != last:
-            print(msg)
-            last = msg
+        print(msg)
         time.sleep_ms(500)
 
 
