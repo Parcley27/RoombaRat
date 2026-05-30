@@ -2,6 +2,7 @@ import cv2
 import os
 import time
 import sys
+import signal
 import argparse
 import serial
 import serial.tools.list_ports
@@ -267,6 +268,33 @@ def main():
         ys = [c[2] for c in centres]
         return (max(xs) - min(xs) < STILL_PX) and (max(ys) - min(ys) < STILL_PX)
 
+    def stop_robot():
+        """Send stop command robustly — called from both normal exit and signal handler."""
+        if args.dry_run or ser is None:
+            return
+        try:
+            stop_cmd = f"0 {STRAIGHT}\n".encode()
+            for _ in range(5):
+                ser.write(stop_cmd)
+            ser.flush()
+            time.sleep(0.2)
+        except Exception:
+            pass
+
+    def handle_exit(signum, frame_):
+        stop_robot()
+        try:
+            ser.close()
+        except Exception:
+            pass
+        cap.release()
+        cv2.destroyAllWindows()
+        print("\nStopped.")
+        sys.exit(0)
+
+    signal.signal(signal.SIGINT,  handle_exit)
+    signal.signal(signal.SIGTERM, handle_exit)
+
     try:
         while True:
             ret, frame = cap.read()
@@ -414,16 +442,12 @@ def main():
                     print(f"Could not switch to {new_name}: {e}")
 
     finally:
-        if not args.dry_run and ser is not None:
-            try:
-                stop_cmd = f"0 {STRAIGHT}\n".encode()
-                for _ in range(3):      # send several times — serial can be lossy under load
-                    ser.write(stop_cmd)
-                ser.flush()             # block until OS buffer drains
-                time.sleep(0.15)        # give ESP32 time to receive and act on it
-            except serial.SerialException:
-                pass
-            ser.close()
+        stop_robot()
+        try:
+            if ser is not None:
+                ser.close()
+        except Exception:
+            pass
         cap.release()
         cv2.destroyAllWindows()
         print("Stopped.")

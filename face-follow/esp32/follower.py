@@ -95,15 +95,23 @@ start()
 beep(0, BOOT_SONG)
 print("Ready. Waiting for commands over USB serial.")
 
-rx_buf = b""
+WATCHDOG_MS = 3000   # stop if Mac goes silent for 3 s (covers clean exit + crashes)
+
+rx_buf       = b""
+last_cmd_ms  = time.ticks_ms()
+watchdog_stopped = False
 
 while True:
+    now_ms = time.ticks_ms()
+
     # Non-blocking read from USB serial (Mac → ESP32)
     r, _, _ = select.select([sys.stdin], [], [], 0)
     if r:
         chunk = sys.stdin.buffer.read(64)
         if chunk:
             rx_buf += chunk
+            last_cmd_ms      = now_ms
+            watchdog_stopped = False
             while b"\n" in rx_buf:
                 line, rx_buf = rx_buf.split(b"\n", 1)
                 line = line.strip().decode("ascii", "ignore")
@@ -113,7 +121,6 @@ while True:
                     beep(1, CONNECT_SONG)
                     print("Mac connected.")
                 elif line == "B":
-                    # Phone caught — sound the alert
                     beep(2, ALERT_SONG)
                     print("ALERT beep")
                 else:
@@ -124,5 +131,11 @@ while True:
                             drive(v, r_val)
                         except ValueError:
                             pass
+
+    # Watchdog — stop Roomba if Mac has been silent for WATCHDOG_MS
+    if not watchdog_stopped and time.ticks_diff(now_ms, last_cmd_ms) > WATCHDOG_MS:
+        drive(0)
+        watchdog_stopped = True
+        print("Watchdog: Mac silent, Roomba stopped.")
 
     time.sleep_ms(5)
