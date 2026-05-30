@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="branding/Full%20Logo.png" width="220" alt="RoombaRat logo" />
+  <img src="Branding/full.png" width="220" alt="RoombaRat logo" />
 </p>
 
 # RoombaRat
@@ -55,17 +55,17 @@ Press `q` to quit. A green "Monitoring..." label means it's working. "PHONE DETE
 
 ## Files
 
-| File | Purpose |
-|---|---|
-| `main.py` | Webcam loop: captures frames, drives detection and alerting |
+| File                       | Purpose                                                                 |
+| -------------------------- | ----------------------------------------------------------------------- |
+| `main.py`                  | Webcam loop: captures frames, drives detection and alerting             |
 | `RekognitionController.py` | Sends frame to AWS Rekognition, returns True if phone/distraction found |
-| `BoxController.py` | Uploads JPEG to Box, returns shareable URL |
-| `EmailController.py` | Sends alert email via AWS SES |
+| `BoxController.py`         | Uploads JPEG to Box, returns shareable URL                              |
+| `EmailController.py`       | Sends alert email via AWS SES                                           |
 
 ## Tuning
 
-| Variable | Default | Effect |
-|---|---|---|
-| `CHECK_INTERVAL` | 2 s | How often to hit Rekognition. Lower = faster response, higher API cost. |
-| `COOLDOWN` | 30 s | Minimum gap between alert emails. Prevents inbox flooding. |
-| `MIN_CONFIDENCE` | — | Rekognition confidence threshold. Lower = more sensitive, more false positives. |
+| Variable         | Default | Effect                                                                          |
+| ---------------- | ------- | ------------------------------------------------------------------------------- |
+| `CHECK_INTERVAL` | 2 s     | How often to hit Rekognition. Lower = faster response, higher API cost.         |
+| `COOLDOWN`       | 30 s    | Minimum gap between alert emails. Prevents inbox flooding.                      |
+| `MIN_CONFIDENCE` | —       | Rekognition confidence threshold. Lower = more sensitive, more false positives. |
