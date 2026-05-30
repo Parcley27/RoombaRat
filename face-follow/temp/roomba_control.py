@@ -110,6 +110,36 @@ def read_battery():
     else:
         print(f"Battery charge: {charge} mAh (capacity unknown)")
 
+CHARGING_STATES = {
+    0: 'Not charging',
+    1: 'Reconditioning',
+    2: 'Full charging',
+    3: 'Trickle charging',
+    4: 'Waiting',
+    5: 'Charging fault',
+}
+
+def monitor_charging():
+    print("Monitoring charge state — press Ctrl-C to stop.")
+    last = None
+    while True:
+        flush()
+        _send([149, 1, 21])   # packet 21 = Charging State
+        time.sleep_ms(50)
+        d = uart.read(1)
+        if d:
+            state = CHARGING_STATES.get(d[0], 'Unknown ({})'.format(d[0]))
+            charging = d[0] in (1, 2, 3)
+            label = 'CHARGING' if charging else 'NOT CHARGING'
+            msg = '[{}]  {}'.format(label, state)
+        else:
+            msg = '[NO RESPONSE]  Roomba not responding'
+        if msg != last:
+            print(msg)
+            last = msg
+        time.sleep_ms(500)
+
+
 def sound_menu():
     print("  Sounds:")
     names = list(SONGS.keys())
@@ -133,6 +163,7 @@ def menu():
     print("3. Wheels")
     print("4. Sound")
     print("5. Drive square (0.5m x 0.5m)")
+    print("6. Monitor charging (Ctrl-C to stop)")
     print("q. Quit")
     return input("Select: ").strip()
 
@@ -196,6 +227,12 @@ while True:
 
     elif choice == '5':
         drive_square()
+
+    elif choice == '6':
+        try:
+            monitor_charging()
+        except KeyboardInterrupt:
+            print("\nStopped monitoring.")
 
     elif choice == 'q':
         stop_all()
