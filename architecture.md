@@ -49,9 +49,10 @@ The two layers are deliberately decoupled: Layer 1 is the fast inner loop that d
                           │ (drive + │ │ Face    │ │store│ │  inbox   │
                           │  beep)   │ │ Collec- │ │+ros-│ └──────────┘
                           └──────────┘ │ tion    │ │ter  │
-                                       │(by stu- │ └─────┘
-                                       │ dent ID)│
+                                       │         │ └─────┘
+                                       │         │
                                        └─────────┘
+                                  
 ```
 
 Layer 1 (B1: YOLO) runs every frame and feeds steering. Layer 2 (B2: Rekognition
