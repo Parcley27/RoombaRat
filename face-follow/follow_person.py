@@ -22,8 +22,8 @@ STRAIGHT = -32768
 CW_SPIN = -1
 CCW_SPIN = 1
 
-CMD_PORT       = 9000
-CONFIRM_FRAMES = 3   # face must appear this many consecutive frames before acting
+CMD_PORT = 9000
+CONFIRM_FRAMES = 2 # make tracking more stable
 
 face_cascade = cv2.CascadeClassifier(
     cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
@@ -44,23 +44,29 @@ def detect_largest_face(frame):
 
 
 def compute_drive(horiz_err, area_ratio):
+    # Too close — back up
     if area_ratio > TARGET_AREA_MAX:
         return BACKUP_SPEED, STRAIGHT
 
-    too_far  = area_ratio < TARGET_AREA_MIN
-    centered = abs(horiz_err) < TURN_THRESHOLD
-    big_err  = abs(horiz_err) >= SPIN_THRESHOLD
+    # Forward speed scales with how far away the face is (0 at target, full at min)
+    dist_t  = max(0.0, (TARGET_AREA_MIN - area_ratio) / TARGET_AREA_MIN)
+    fwd     = int(FORWARD_SPEED * dist_t)  # 0 at target distance, FORWARD_SPEED when far
 
-    if centered:
-        return (FORWARD_SPEED if too_far else 0), STRAIGHT
+    big_err = abs(horiz_err) >= SPIN_THRESHOLD
 
     if big_err:
-        return 70, (CW_SPIN if horiz_err > 0 else CCW_SPIN)
+        # Very off-centre — in-place spin, no forward
+        return 80, (CW_SPIN if horiz_err > 0 else CCW_SPIN)
 
+    if abs(horiz_err) < TURN_THRESHOLD:
+        # Centred — drive straight at computed forward speed (may be 0 when at target)
+        return max(fwd, 0), STRAIGHT
+
+    # Proportional curve — always move at least a little
     t      = (abs(horiz_err) - TURN_THRESHOLD) / (SPIN_THRESHOLD - TURN_THRESHOLD)
     r_mag  = int(800 * (1 - t) + 200 * t)
     radius = -r_mag if horiz_err > 0 else r_mag
-    speed  = int(FORWARD_SPEED * (1 - t * 0.5)) if too_far else int(60 * (1 - t * 0.3))
+    speed  = max(fwd + int(60 * (1 - t)), 60)   # never below 60 mm/s while curving
     return speed, radius
 
 
@@ -110,13 +116,6 @@ def main():
                 last_send_time = now
             except OSError as e:
                 print(f"Network error ({e}) — waiting for ESP32 to reconnect...")
-
-    # Startup test — confirms drive commands reach the Roomba
-    print("Startup test: forward 2s...")
-    cmd_sock.sendto(b'200 -32768\n', esp32_addr)
-    time.sleep(2)
-    cmd_sock.sendto(b'0 -32768\n', esp32_addr)
-    print("Test done. Starting face tracking...")
 
     try:
         while True:
