@@ -118,18 +118,17 @@ def detect_largest_face(frame):
 
 
 def compute_drive(horiz_err, area_ratio):
-    """Same proportional follower as follow_person.py."""
     if area_ratio > TARGET_AREA_MAX:
         return BACKUP_SPEED, STRAIGHT
 
-    if abs(horiz_err) >= SPIN_THRESHOLD:
-        return 100, (CW_SPIN if horiz_err > 0 else CCW_SPIN)
+    speed = FORWARD_SPEED if area_ratio < TARGET_AREA_MIN else 100
 
-    t      = min(abs(horiz_err) / SPIN_THRESHOLD, 1.0)
-    r_mag  = int(800 * (1 - t) + 200 * t)        # 800mm gentle -> 200mm sharp
+    # Always drive forward — curve sharper as error grows, never pure spin.
+    # Radius: 800mm (near-straight) → 150mm (sharp) across the full frame width.
+    t      = min(abs(horiz_err) / 1.0, 1.0)
+    r_mag  = int(800 * (1 - t) + 150 * t)
     radius = -r_mag if horiz_err > 0 else r_mag
 
-    speed = FORWARD_SPEED if area_ratio < TARGET_AREA_MIN else 100
     return speed, radius
 
 
@@ -193,7 +192,10 @@ def main():
     for _ in range(60):
         ret, _f = cap.read()
         if ret and _f is not None and _f.shape[0] > 0:
-            frame_h, frame_w = _f.shape[:2]
+            # Measure from the rotated frame — 90° rotation swaps w/h,
+            # so raw dimensions would make every face appear off-center.
+            _f_rot = rotate_frame(_f, CAMERA_ROTATE)
+            frame_h, frame_w = _f_rot.shape[:2]
             frame_area = frame_w * frame_h
             break
         time.sleep(0.05)
