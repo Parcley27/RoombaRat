@@ -1,6 +1,4 @@
-# Roomba Mapper – Python dependencies
-# Install with:  pip install -r requirements.txt
-
-numpy>=1.23.0
-opencv-python>=4.7.0
-scipy>=1.10.0
+boto3
+opencv-python
+boxsdk<4
+python-dotenv
