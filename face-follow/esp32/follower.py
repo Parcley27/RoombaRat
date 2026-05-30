@@ -25,11 +25,42 @@ def wake():
     brc.value(1)
     time.sleep_ms(100)
 
+def flush():
+    while uart.any():
+        uart.read(uart.any())
+
+def oi_mode():
+    """Return current OI mode byte: 0=off 1=passive 2=safe 3=full, or -1 on timeout."""
+    flush()
+    _send([149, 1, 35])   # Query List: packet 35 = OI Mode
+    time.sleep_ms(50)
+    d = uart.read(1)
+    return d[0] if d else -1
+
 def start():
-    _send([128])
-    time.sleep_ms(200)
-    _send([132])
-    time.sleep_ms(200)
+    """Send START + FULL, retrying until the Roomba confirms Full mode (mode byte == 3)."""
+    for attempt in range(5):
+        flush()
+        _send([128])          # START  → Passive
+        time.sleep_ms(300)
+        _send([132])          # FULL
+        time.sleep_ms(500)
+        mode = oi_mode()
+        print("OI mode after attempt {}: {}".format(attempt + 1, mode))
+        if mode == 3:
+            print("Roomba in Full mode.")
+            return
+        # Not in Full yet — try Safe first as a stepping stone
+        _send([131])
+        time.sleep_ms(300)
+        _send([132])
+        time.sleep_ms(500)
+        mode = oi_mode()
+        if mode in (2, 3):
+            print("Roomba in mode {} after Safe→Full.".format(mode))
+            return
+        time.sleep_ms(500)
+    print("WARNING: could not confirm Full mode — commands may be ignored.")
 
 def drive(velocity, radius=-32768):
     v = velocity & 0xFFFF
@@ -54,11 +85,12 @@ BOOT_SONG    = [(60, 16), (67, 24)]
 CONNECT_SONG = [(72, 8), (76, 8), (79, 12)]
 
 # --- boot ---
-print("Waking Roomba...")
+# Press the CLEAN button on the Roomba BEFORE running this script if
+# starting from fully powered-off state — BRC alone can't turn it on.
+print("Waking Roomba (make sure CLEAN was pressed to power it on)...")
 wake()
-time.sleep_ms(1000)
+time.sleep_ms(2000)   # give Roomba time to finish its boot sequence
 start()
-time.sleep_ms(500)
 beep(0, BOOT_SONG)
 print("Ready. Waiting for commands over USB serial.")
 
