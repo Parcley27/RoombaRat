@@ -1,20 +1,3 @@
-"""
-RoombaRat patrol — merges the two original programs into one behaviour:
-
-  SEARCH    spin until a face is found
-  APPROACH  follow that face until it fills ~5% of the frame (or stops moving);
-            while a face is in view, periodically ask Rekognition if a phone is
-            present — if so, beep the Roomba and fire the Box upload + email alert
-  ARRIVED   reached / face went still -> brief stop
-  TURN_AWAY spin in the OPPOSITE direction for a moment to leave that face, then
-            drop back to SEARCH and lock onto whoever shows up next
-
-Driving reuses the face-follow path (USB serial -> ESP32 -> Roomba). Phone detection /
-Box / email reuse main.py's pipeline. Run with --dry-run (no robot) and
---mock-phone (press 'p' to fake a phone) to exercise the whole state machine on a
-bare laptop with just a webcam.
-"""
-
 import cv2
 import os
 import time
@@ -24,12 +7,16 @@ import serial
 import serial.tools.list_ports
 from collections import deque
 from datetime import datetime
+from dotenv import load_dotenv
 
-# --- face-follow tuning (from follow_person.py) ---
-CAMERA_INDEX   = int(os.getenv('CAMERA_INDEX', '0'))
-CAMERA_ROTATE  = int(os.getenv('CAMERA_ROTATE', '0'))  # 0/90/180/-90 if feed is rotated
-FACE_TIMEOUT   = 0.5    # seconds to coast on last known position before searching
-CMD_INTERVAL   = 0.10   # min seconds between sending repeated identical commands
+load_dotenv(override=True)
+
+# Continuity Camera on Mac is typically index 1 (index 0 = built-in FaceTime camera).
+# Set CAMERA_INDEX and CAMERA_ROTATE in .env to match your setup.
+CAMERA_INDEX   = int(os.getenv('CAMERA_INDEX', '1'))
+CAMERA_ROTATE  = int(os.getenv('CAMERA_ROTATE', '-90'))  # Continuity Camera is sideways
+FACE_TIMEOUT   = 0.5 
+CMD_INTERVAL   = 0.10
 
 TARGET_AREA_MIN = 0.03  # drive forward below this (face too small = too far)
 TARGET_AREA_MAX = 0.07  # back up above this (face too large = too close)
@@ -43,7 +30,7 @@ STRAIGHT = -32768
 CW_SPIN  = -1
 CCW_SPIN = 1
 
-CONFIRM_FRAMES = 2      # consecutive face frames before we trust it
+CONFIRM_FRAMES = 2
 
 # ESP32 talks over USB serial now (no WiFi). Blank = auto-detect by port description.
 SERIAL_PORT    = os.getenv('SERIAL_PORT', '')   # e.g. COM5 or /dev/cu.usbserial-XXXX
@@ -66,8 +53,6 @@ COOLDOWN       = 30.0   # seconds between phone alerts
 ALERT_AVAILABLE = True
 _alert_import_error = None
 try:
-    from dotenv import load_dotenv
-    load_dotenv(override=True)
     from BoxController import upload_to_box
     from EmailController import send_alert_email
 except Exception as e:           # boto3 / boxsdk / creds missing, etc.
@@ -184,8 +169,8 @@ def main():
         port = args.port or SERIAL_PORT or find_serial_port()
         if not port:
             print("Could not find ESP32 serial port. Plug in the USB-C cable, then either")
-            print("  set SERIAL_PORT=COM5 (or /dev/cu.usbserial-XXXX) in .env")
-            print("  or pass --port COM5")
+            print("  set SERIAL_PORT=/dev/cu.usbserial-XXXX in .env")
+            print("  or pass --port /dev/cu.usbserial-XXXX")
             print("Available ports:")
             for p in serial.tools.list_ports.comports():
                 print(f"  {p.device}  {p.description}")
@@ -418,7 +403,11 @@ def main():
     finally:
         if not args.dry_run and ser is not None:
             try:
-                ser.write(f"0 {STRAIGHT}\n".encode())
+                stop_cmd = f"0 {STRAIGHT}\n".encode()
+                for _ in range(3):      # send several times — serial can be lossy under load
+                    ser.write(stop_cmd)
+                ser.flush()             # block until OS buffer drains
+                time.sleep(0.15)        # give ESP32 time to receive and act on it
             except serial.SerialException:
                 pass
             ser.close()
