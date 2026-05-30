@@ -9,3 +9,4 @@ venv/
 dist/
 build/
 box_config.json
+.vscode
