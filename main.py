@@ -4,13 +4,13 @@ import time
 from datetime import datetime
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(override=True)
 
 from RekognitionController import check_for_phone
 from BoxController import upload_to_box
 from EmailController import send_alert_email
 
-CAMERA_INDEX = int(os.getenv('CAMERA_INDEX', '0'))
+CAMERA_INDEX = int(os.getenv('CAMERA_INDEX', '1'))
 CHECK_INTERVAL = float(os.getenv('CHECK_INTERVAL', '2.0'))  # seconds between Rekognition calls
 COOLDOWN = float(os.getenv('COOLDOWN', '30.0'))             # seconds between alerts
 
