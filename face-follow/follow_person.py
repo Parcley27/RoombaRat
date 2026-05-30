@@ -22,22 +22,21 @@ STRAIGHT = -32768
 CW_SPIN = -1
 CCW_SPIN = 1
 
-CMD_PORT = 9000
+CMD_PORT       = 9000
+CONFIRM_FRAMES = 3   # face must appear this many consecutive frames before acting
 
 face_cascade = cv2.CascadeClassifier(
     cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
 )
 
-
 def discover_esp32():
-    # esp32 ip
     return '192.168.4.1'
 
 
 def detect_largest_face(frame):
     gray  = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     faces = face_cascade.detectMultiScale(
-        gray, scaleFactor=1.1, minNeighbors=5, minSize=(40, 40)
+        gray, scaleFactor=1.1, minNeighbors=9, minSize=(60, 60)
     )
     if len(faces) == 0:
         return None
@@ -94,11 +93,12 @@ def main():
     frame_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     frame_area = frame_w * frame_h
 
-    last_drive = None
-    last_send_time = 0.0
-    last_status = ''
-    last_face_time = 0.0
-    last_box = None
+    last_drive      = None
+    last_send_time  = 0.0
+    last_status     = ''
+    last_face_time  = 0.0
+    last_box        = None
+    face_streak     = 0   # consecutive frames with a confirmed face
 
     def send_drive(v, r):
         nonlocal last_drive, last_send_time
@@ -128,8 +128,13 @@ def main():
             box = detect_largest_face(frame)
 
             if box is not None:
+                face_streak = min(face_streak + 1, CONFIRM_FRAMES)
+            else:
+                face_streak = 0
+
+            if box is not None and face_streak >= CONFIRM_FRAMES:
                 last_face_time = now
-                last_box = box
+                last_box       = box
 
             face_active = (now - last_face_time) < FACE_TIMEOUT
 
