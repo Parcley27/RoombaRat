@@ -14,10 +14,10 @@ load_dotenv(override=True)
 
 # Continuity Camera on Mac is typically index 1 (index 0 = built-in FaceTime camera).
 # Set CAMERA_INDEX and CAMERA_ROTATE in .env to match your setup.
-CAMERA_INDEX   = 0
-CAMERA_ROTATE  = int(os.getenv('CAMERA_ROTATE', '-90'))  # Continuity Camera is sideways
-FACE_TIMEOUT   = 0.5 
-CMD_INTERVAL   = 0.10
+CAMERA_INDEX = 0
+CAMERA_ROTATE = int(os.getenv('CAMERA_ROTATE', '-90'))  # Continuity Camera is sideways
+FACE_TIMEOUT = 0.5 
+CMD_INTERVAL = 0.10
 
 TARGET_AREA_MIN = 0.03  # drive forward below this (face too small = too far)
 TARGET_AREA_MAX = 0.07  # back up above this (face too large = too close)
