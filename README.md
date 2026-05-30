@@ -1,9 +1,9 @@
 # RoombaRat
 
-> A Roomba with a phone on top that patrols classrooms and snitches on anyone caught using their phone.
+> A Roomba with a phone on top that patrols classrooms and snitches on anyone caught using their phone, or otherwise distracted.
 > Built at Cascadia AI Hackathon 2026 by Pierce Nestibo-Oxley, Dale Dai, Jerry Hu, and Daniel Guo.
 
-When the camera detects a phone, it uploads a screenshot to Box and emails the principal.
+When the camera detects a phone or other distraction, it uploads a screenshot to Box and emails the principal.
 
 ---
 
@@ -48,7 +48,7 @@ With Apple Continuity Camera, the iPhone shows up as a system webcam. `CAMERA_IN
 python main.py
 ```
 
-Press `q` to quit. A green "Monitoring..." label means it's working. Red "PHONE DETECTED!" triggers an upload + email.
+Press `q` to quit. A green "Monitoring..." label means it's working. Red "PHONE DETECTED!" triggers an upload + email. Samething but an orange "DISTRACTION DETECTED" for other stuff.
 
 ---
 
@@ -57,7 +57,7 @@ Press `q` to quit. A green "Monitoring..." label means it's working. Red "PHONE 
 | File | Purpose |
 |---|---|
 | `main.py` | Webcam loop — captures frames, drives detection + alerting |
-| `RekognitionController.py` | Sends frame to AWS Rekognition, returns True if phone found |
+| `RekognitionController.py` | Sends frame to AWS Rekognition, returns True if phone/distraction found |
 | `BoxController.py` | Uploads JPEG to Box, returns shareable URL |
 | `EmailController.py` | Sends alert email via AWS SES |
 
