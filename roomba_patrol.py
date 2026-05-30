@@ -12,20 +12,18 @@ from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
-# Continuity Camera on Mac is typically index 1 (index 0 = built-in FaceTime camera).
-# Set CAMERA_INDEX and CAMERA_ROTATE in .env to match your setup.
 CAMERA_INDEX = 0
-CAMERA_ROTATE = int(os.getenv('CAMERA_ROTATE', '-90'))  # Continuity Camera is sideways
+CAMERA_ROTATE = int(os.getenv('CAMERA_ROTATE', '-90'))
 FACE_TIMEOUT = 0.5 
 CMD_INTERVAL = 0.10
 
-TARGET_AREA_MIN = 0.03  # drive forward below this (face too small = too far)
-TARGET_AREA_MAX = 0.07  # back up above this (face too large = too close)
-SPIN_THRESHOLD  = 0.40  # in-place spin above this, curved drive below
+TARGET_AREA_MIN = 0.03
+TARGET_AREA_MAX = 0.07
+SPIN_THRESHOLD  = 0.40
 
-FORWARD_SPEED = 180     # mm/s base forward speed
-SEARCH_SPEED  = 60      # mm/s spin speed when searching
-BACKUP_SPEED  = -80     # mm/s when too close
+FORWARD_SPEED = 180
+SEARCH_SPEED = 60
+BACKUP_SPEED = -80
 
 STRAIGHT = -32768
 CW_SPIN  = -1
@@ -33,38 +31,28 @@ CCW_SPIN = 1
 
 CONFIRM_FRAMES = 2
 
-# ESP32 talks over USB serial now (no WiFi). Blank = auto-detect by port description.
-SERIAL_PORT    = os.getenv('SERIAL_PORT', '')   # e.g. COM5 or /dev/cu.usbserial-XXXX
-BAUD_RATE      = 115200
+SERIAL_PORT = os.getenv('SERIAL_PORT', '')
+BAUD_RATE = 115200
 
-# --- patrol behaviour ---
-ARRIVE_AREA    = 0.05   # face this fraction of frame => "reached" this person
-STILL_TIME     = 1.5    # face must hold still this long to count as "done"
-STILL_PX       = 25     # max centre wander (px) over STILL_TIME to count as still
-ARRIVE_PAUSE   = 0.6    # seconds to sit still on arrival
-TURN_AWAY_TIME = 1.3    # seconds to spin away before re-acquiring a new face
+ARRIVE_AREA = 0.05
+STILL_TIME = 1.5
+STILL_PX = 25
+ARRIVE_PAUSE = 0.6
+TURN_AWAY_TIME = 1.3
 
-# --- phone detection cadence (from main.py) ---
-CHECK_INTERVAL = 2.0    # seconds between Rekognition calls (only while a face is up)
-COOLDOWN       = 30.0   # seconds between phone alerts
+CHECK_INTERVAL = 2.0
+COOLDOWN = 30.0
 
-# Alert pipeline (Box upload + SES email) is optional — without it (or with
-# --no-phone) this runs as a pure face patroller. Imported lazily so --dry-run
-# works with no AWS/Box creds.
 ALERT_AVAILABLE = True
 _alert_import_error = None
 try:
     from BoxController import upload_to_box
     from EmailController import send_alert_email
-except Exception as e:           # boto3 / boxsdk / creds missing, etc.
+except Exception as e:
     ALERT_AVAILABLE = False
     _alert_import_error = e
 
-# Phone detector backends. 'rekognition' = AWS cloud (paid, ~2s); 'yolo' = local
-# (free, every-frame). Loaded on demand so you only pay the import cost of the
-# one you use. Each returns check_for_phone(frame) -> bool.
 DETECTOR_INTERVAL = {'rekognition': CHECK_INTERVAL, 'yolo': 0.10}
-
 
 def load_detector(name):
     if name == 'rekognition':
@@ -123,14 +111,11 @@ def compute_drive(horiz_err, area_ratio):
 
     speed = FORWARD_SPEED if area_ratio < TARGET_AREA_MIN else 100
 
-    # Always drive forward — curve sharper as error grows, never pure spin.
-    # Radius: 800mm (near-straight) → 150mm (sharp) across the full frame width.
-    t      = min(abs(horiz_err) / 1.0, 1.0)
+    t = min(abs(horiz_err) / 1.0, 1.0)
     r_mag  = int(800 * (1 - t) + 150 * t)
     radius = -r_mag if horiz_err > 0 else r_mag
 
     return speed, radius
-
 
 def main():
     parser = argparse.ArgumentParser()
@@ -148,7 +133,6 @@ def main():
                              "rekognition=AWS cloud. Toggle live with 'd'.")
     args = parser.parse_args()
 
-    # Resolve the phone detector backend (unless mocking or disabled).
     detector_name = args.detector
     check_fn      = None
     if not args.no_phone and not args.mock_phone:
@@ -185,15 +169,11 @@ def main():
         print(f"Could not open camera {args.camera}.")
         sys.exit(1)
 
-    # Continuity Camera on Mac returns black/empty frames while it warms up.
-    # Drain until we get a real frame so frame dimensions are correct.
     print("Waiting for camera feed...", end="", flush=True)
     frame_w = frame_h = frame_area = 0
     for _ in range(60):
         ret, _f = cap.read()
         if ret and _f is not None and _f.shape[0] > 0:
-            # Measure from the rotated frame — 90° rotation swaps w/h,
-            # so raw dimensions would make every face appear off-center.
             _f_rot = rotate_frame(_f, CAMERA_ROTATE)
             frame_h, frame_w = _f_rot.shape[:2]
             frame_area = frame_w * frame_h
@@ -223,7 +203,6 @@ def main():
         send(f"{v} {r}\n".encode(), 'drive')
 
     def send_beep():
-        # 'B' is handled by the ESP32 serial firmware (face-follow/esp32/follower.py).
         if args.dry_run:
             print("[dry-run] BEEP")
             return
@@ -248,19 +227,19 @@ def main():
             print(f"Alert failed: {e}")
 
     # --- state ---
-    state          = State.SEARCH
-    search_dir     = CCW_SPIN
+    state = State.SEARCH
+    search_dir = CCW_SPIN
     last_face_time = 0.0
-    last_box       = None
-    face_streak    = 0
-    centres        = deque()        # (t, cx, cy) history while approaching
-    arrived_time   = 0.0
-    turn_until     = 0.0
-    last_check        = 0.0
-    last_alert        = 0.0
-    phone_override    = False       # set by 'p' in --mock-phone mode
-    phone_alert_until = 0.0         # show the "DETECTED" banner until this time
-    last_status       = ''
+    last_box = None
+    face_streak = 0
+    centres = deque()
+    arrived_time = 0.0
+    turn_until = 0.0
+    last_check = 0.0
+    last_alert = 0.0
+    phone_override = False
+    phone_alert_until = 0.0
+    last_status = ''
 
     def is_still():
         """True if the face centre barely moved over the last STILL_TIME."""
@@ -301,7 +280,7 @@ def main():
         while True:
             ret, frame = cap.read()
             if not ret or frame is None:
-                cv2.waitKey(1)   # keep the window event loop alive
+                cv2.waitKey(1)
                 continue
             frame = rotate_frame(frame, CAMERA_ROTATE)
             now = time.time()
@@ -315,8 +294,6 @@ def main():
                 last_face_time, last_box = now, box
             face_active = (now - last_face_time) < FACE_TIMEOUT
 
-            # always show the raw detection + its size, in every state, so you can
-            # see exactly when the cascade drops the face (e.g. too close/cropped)
             if box is not None:
                 bx, by, bw, bh = box
                 bar  = (bw * bh) / frame_area
@@ -327,7 +304,6 @@ def main():
 
             label = state
 
-            # ---------------- state machine ----------------
             if state == State.SEARCH:
                 send_drive(SEARCH_SPEED, search_dir)
                 if face_active:
@@ -354,7 +330,6 @@ def main():
 
                     label = f"APPROACH area={area_ratio:.3f} err={horiz_err:+.2f}"
 
-                    # phone check — only while a face is up, throttled + cooled down
                     if phone_enabled and now - last_check >= check_interval:
                         last_check = now
                         try:
@@ -366,38 +341,34 @@ def main():
                             hit = False
                             print(f"{detector_name} error: {e}")
                         if hit:
-                            phone_alert_until = now + 3.0   # flag it on screen
+                            phone_alert_until = now + 3.0
                             if now - last_alert >= COOLDOWN:
                                 last_alert = now
-                                trigger_alert(frame)        # beep + Box + email
+                                trigger_alert(frame)
 
                     if area_ratio >= ARRIVE_AREA or is_still():
-                        state        = State.ARRIVED
+                        state = State.ARRIVED
                         arrived_time = now
-                        label        = "ARRIVED"
+                        label = "ARRIVED"
 
             elif state == State.ARRIVED:
                 send_drive(0, STRAIGHT)
                 if now - arrived_time >= ARRIVE_PAUSE:
-                    search_dir = -search_dir          # leave in a new direction
+                    search_dir = -search_dir
                     turn_until = now + TURN_AWAY_TIME
-                    state      = State.TURN_AWAY
+                    state = State.TURN_AWAY
 
             elif state == State.TURN_AWAY:
                 send_drive(SEARCH_SPEED, search_dir)
                 label = "TURN AWAY"
                 if now >= turn_until:
-                    last_face_time = 0.0              # don't re-lock the one we left
-                    state          = State.SEARCH
+                    last_face_time = 0.0
+                    state = State.SEARCH
 
-            # ---------------- HUD / logging ----------------
             colour = (0, 255, 0) if state == State.APPROACH else (0, 165, 255)
-            cv2.putText(frame, f"{state}", (10, 28),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.72, colour, 2)
-            cv2.putText(frame, label, (10, 55),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
+            cv2.putText(frame, f"{state}", (10, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.72, colour, 2)
+            cv2.putText(frame, label, (10, 55), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
 
-            # phone status — always-visible top-right indicator
             if phone_enabled:
                 fw = frame.shape[1]
                 if now < phone_alert_until:
@@ -409,7 +380,7 @@ def main():
                 (tw, _), _ = cv2.getTextSize(ptxt, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
                 cv2.putText(frame, ptxt, (fw - tw - 10, 28),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.6, pcol, 2)
-                # big banner while a phone is flagged
+
                 if now < phone_alert_until:
                     cv2.putText(frame, "PHONE DETECTED!", (10, 95),
                                 cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 3)
@@ -430,7 +401,7 @@ def main():
                 phone_override = True
                 print("[mock] phone queued for next check")
             if key == ord('d') and not args.mock_phone and not args.no_phone:
-                # live-switch detector backend (lazy-load the other one)
+
                 new_name = 'yolo' if detector_name == 'rekognition' else 'rekognition'
                 try:
                     check_fn       = load_detector(new_name)

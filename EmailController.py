@@ -3,7 +3,6 @@ import os
 
 ses = boto3.client('ses', region_name=os.getenv('AWS_REGION', 'us-east-2'))
 
-
 def send_alert_email(filename: str, box_url: str | None = None) -> None:
     sender = os.environ['SES_SENDER_EMAIL']
     recipient = os.environ['ALERT_EMAIL']
@@ -24,7 +23,6 @@ def send_alert_email(filename: str, box_url: str | None = None) -> None:
             'Body': {'Text': {'Data': '\n'.join(body_lines)}},
         },
     )
-
 
 def send_distraction_email(filename: str, box_url: str | None = None) -> None:
     sender = os.environ['SES_SENDER_EMAIL']

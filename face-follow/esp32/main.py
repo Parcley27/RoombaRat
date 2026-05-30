@@ -1,29 +1,16 @@
-# main.py – MicroPython ESP32 Roomba OI bridge
-#
-# In Thonny: File → Save copy → MicroPython device → main.py
-#
-# Wiring:
-#   GPIO 4  → Roomba Mini-DIN pin 5 (BRC)
-#   GPIO 25 ← Roomba Mini-DIN pin 4 (Roomba TXD → ESP32 RX)
-#   GPIO 26 → Roomba Mini-DIN pin 3 (Roomba RXD ← ESP32 TX)
-#   GND     → Roomba Mini-DIN pin 6 or 7
-
 import network
 import socket
 import time
 import machine
 
-# ── WiFi ──────────────────────────────────────────────────────────────────────
 WIFI_SSID = "The wifi"
 WIFI_PASS = "6394701868"
 TCP_PORT  = 8080
 
-# ── Pin assignments ───────────────────────────────────────────────────────────
 BRC_PIN = 4
 RX_PIN  = 26
 TX_PIN  = 25
 
-# ── Roomba OI opcodes ─────────────────────────────────────────────────────────
 OI_START        = 128
 OI_SAFE         = 131
 OI_FULL         = 132
@@ -37,7 +24,6 @@ SONGS = {
 }
 
 def read_battery():
-    # Request packet 25 (charge) and 26 (capacity) via Query List opcode 149
     _send([149, 2, 25, 26])
     time.sleep_ms(50)
     data = uart.read(4)
@@ -64,18 +50,14 @@ def define_song(slot, notes):
 def play_song(slot):
     _send([141, slot])
 
-# ── Sensor query (9 packets → 11 bytes response) ──────────────────────────────
 QUERY_PACKETS  = bytes([7, 8, 9, 10, 11, 12, 14, 43, 44])
 RESPONSE_BYTES = 11
-
-# ── Hardware init ─────────────────────────────────────────────────────────────
 brc  = machine.Pin(BRC_PIN, machine.Pin.OUT, value=1)
 uart = machine.UART(1, baudrate=115200, bits=8, parity=None, stop=1,
                     rx=RX_PIN, tx=TX_PIN, rxbuf=256)
 
 roomba_ready = False   # set True only after Roomba confirms OI is active
 
-# ── Roomba helpers ────────────────────────────────────────────────────────────
 
 def flush_uart():
     if uart.any():
@@ -120,7 +102,6 @@ def query_sensors():
         (d[9] << 8) | d[10],
     )
 
-# ── Roomba initialisation with diagnostics ────────────────────────────────────
 
 def init_roomba():
     global roomba_ready
@@ -179,8 +160,6 @@ def init_roomba():
     print("")
     return roomba_ready
 
-# ── Command handler ───────────────────────────────────────────────────────────
-
 def handle_command(raw):
     global roomba_ready
     line = raw.strip()
@@ -201,8 +180,6 @@ def handle_command(raw):
         # Laptop can request a re-init if it notices no sensor data
         init_roomba()
 
-# ── WiFi ──────────────────────────────────────────────────────────────────────
-
 def connect_wifi():
     wlan = network.WLAN(network.STA_IF)
     wlan.active(True)
@@ -221,8 +198,6 @@ def connect_wifi():
     print("\nConnected! IP:", wlan.ifconfig()[0])
     print(">>> Put this IP in roomba_mapper/config.py as ESP32_IP <<<")
 
-# ── TCP server ────────────────────────────────────────────────────────────────
-
 def run_server():
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -236,7 +211,6 @@ def run_server():
 
     SENSOR_PERIOD_MS = 50
     SAFE_PERIOD_MS   = 5000
-    # How many consecutive sensor timeouts before we print a warning
     TIMEOUT_WARN     = 40
 
     t_sensor      = time.ticks_ms()
@@ -306,8 +280,6 @@ def run_server():
                     print("  import main; main.init_roomba()")
                 elif timeout_count % 100 == 0:
                     print("Still no sensor data ({} timeouts)...".format(timeout_count))
-
-# ── Entry point ───────────────────────────────────────────────────────────────
 
 connect_wifi()
 init_roomba()

@@ -1,10 +1,6 @@
 from machine import UART
 import time
 
-# Disconnect Roomba wires from GPIO25 and GPIO26.
-# Plug a single wire directly from GPIO26 to GPIO25 (TX loopback to RX).
-# Then run this script — if UART hardware works, you'll see "UART OK: b'TEST'"
-
 uart = UART(1, baudrate=115200, tx=26, rx=25)
 time.sleep_ms(100)
 

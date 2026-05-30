@@ -3,10 +3,6 @@ import sys
 import time
 from machine import UART, Pin
 
-# Communicates with the Mac over USB serial (sys.stdin / sys.stdout).
-# No WiFi needed — plug the USB-C cable in and run the Mac script.
-# UART1 (GPIO25/26) is still dedicated to the Roomba OI.
-
 BRC_PIN = 4
 UART_TX = 25
 UART_RX = 26
@@ -52,19 +48,16 @@ def beep(slot, notes):
 
 BOOT_SONG    = [(60, 16), (67, 24)]
 CONNECT_SONG = [(72, 8), (76, 8), (79, 12)]
-ALERT_SONG   = [(84, 6), (84, 6), (84, 12)]   # phone caught — three sharp blips
+ALERT_SONG   = [(84, 6), (84, 6), (84, 12)]
 
-# --- boot ---
-# Press the CLEAN button on the Roomba BEFORE running this script if
-# starting from fully powered-off state — BRC alone can't turn it on.
 print("Waking Roomba (make sure CLEAN was pressed to power it on)...")
 wake()
-time.sleep_ms(2000)   # give Roomba time to finish its boot sequence
+time.sleep_ms(2000)
 start()
 beep(0, BOOT_SONG)
 print("Ready. Waiting for commands over USB serial.")
 
-WATCHDOG_MS = 5000   # stop if Mac goes silent for 5 s (covers clean exit + crashes)
+WATCHDOG_MS = 5000
 
 rx_buf       = b""
 last_cmd_ms  = time.ticks_ms()
@@ -73,7 +66,6 @@ watchdog_stopped = False
 while True:
     now_ms = time.ticks_ms()
 
-    # Non-blocking read from USB serial (Mac → ESP32)
     r, _, _ = select.select([sys.stdin], [], [], 0)
     if r:
         chunk = sys.stdin.buffer.read(64)
@@ -101,7 +93,6 @@ while True:
                         except ValueError:
                             pass
 
-    # Watchdog — stop Roomba if Mac has been silent for WATCHDOG_MS
     if not watchdog_stopped and time.ticks_diff(now_ms, last_cmd_ms) > WATCHDOG_MS:
         start()        # re-enter Full mode in case OI dropped to Passive
         drive(0)       # then send stop

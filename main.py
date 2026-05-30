@@ -11,8 +11,8 @@ from BoxController import upload_to_box
 from EmailController import send_alert_email, send_distraction_email
 
 CAMERA_INDEX = int(os.getenv('CAMERA_INDEX', '1'))
-CHECK_INTERVAL = float(os.getenv('CHECK_INTERVAL', '2.0'))  # seconds between Rekognition calls
-COOLDOWN = float(os.getenv('COOLDOWN', '30.0'))             # seconds between alerts
+CHECK_INTERVAL = float(os.getenv('CHECK_INTERVAL', '2.0'))
+COOLDOWN = float(os.getenv('COOLDOWN', '30.0'))
 
 
 def main():

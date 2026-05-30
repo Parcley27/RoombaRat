@@ -9,7 +9,6 @@ from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
-# --- tuning ---
 CAMERA_INDEX = 0
 FACE_TIMEOUT = 0.5
 CMD_INTERVAL = 0.10
@@ -28,7 +27,7 @@ CCW_SPIN =  1
 
 CONFIRM_FRAMES = 2
 
-SERIAL_PORT = os.getenv('SERIAL_PORT', '')   # e.g. /dev/cu.usbserial-0001
+SERIAL_PORT = os.getenv('SERIAL_PORT', '')
 BAUD_RATE   = 115200
 
 face_cascade = cv2.CascadeClassifier(

@@ -1,22 +1,8 @@
-"""
-Local phone detector — drop-in alternative to RekognitionController.
-
-Runs a COCO-pretrained YOLO model on-device (no network, no per-call cost), so
-detection happens every frame instead of every ~2s. COCO already has a
-'cell phone' class (id 67), which is what we look for.
-
-Exposes the same check_for_phone(frame) -> bool signature as
-RekognitionController so roomba_patrol can swap between them freely.
-
-Needs:  pip install ultralytics   (pulls in PyTorch)
-The weights file (default yolov8n.pt, ~6MB) auto-downloads on first use.
-"""
-
 import os
 
-PHONE_CLASSES = {'cell phone'}                       # COCO class name
+PHONE_CLASSES = {'cell phone'}
 MIN_CONFIDENCE = float(os.getenv('YOLO_MIN_CONFIDENCE', '0.35'))
-WEIGHTS = os.getenv('YOLO_WEIGHTS', 'yolov8n.pt')    # n=nano (fastest on CPU)
+WEIGHTS = os.getenv('YOLO_WEIGHTS', 'yolov8n.pt')
 
 _model = None
 
@@ -24,7 +10,7 @@ _model = None
 def _get_model():
     global _model
     if _model is None:
-        from ultralytics import YOLO     # lazy — only import torch if YOLO is used
+        from ultralytics import YOLO
         _model = YOLO(WEIGHTS)
     return _model
 
