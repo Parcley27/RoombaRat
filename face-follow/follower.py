@@ -96,11 +96,17 @@ while True:
         last_cmd_ms = now_ms
         stopped = False
         if line == 'C':
+            # Re-enter Full mode in case Roomba dropped to Passive
+            start()
+            time.sleep_ms(100)
             beep(1, CONNECT_SONG)
+            print("Mac connected, Roomba in Full mode.")
         else:
             parts = line.split()
             if len(parts) == 2:
-                drive(int(parts[0]), int(parts[1]))
+                v, r = int(parts[0]), int(parts[1])
+                print("CMD:", v, r)
+                drive(v, r)
     except OSError:
         pass
 

@@ -48,25 +48,21 @@ def compute_drive(horiz_err, area_ratio):
     if area_ratio > TARGET_AREA_MAX:
         return BACKUP_SPEED, STRAIGHT
 
-    # Forward speed scales with how far away the face is (0 at target, full at min)
-    dist_t  = max(0.0, (TARGET_AREA_MIN - area_ratio) / TARGET_AREA_MIN)
-    fwd     = int(FORWARD_SPEED * dist_t)  # 0 at target distance, FORWARD_SPEED when far
+    # Large error — spin in place to re-centre before driving
+    if abs(horiz_err) >= SPIN_THRESHOLD:
+        return 100, (CW_SPIN if horiz_err > 0 else CCW_SPIN)
 
-    big_err = abs(horiz_err) >= SPIN_THRESHOLD
-
-    if big_err:
-        # Very off-centre — in-place spin, no forward
-        return 80, (CW_SPIN if horiz_err > 0 else CCW_SPIN)
-
-    if abs(horiz_err) < TURN_THRESHOLD:
-        # Centred — drive straight at computed forward speed (may be 0 when at target)
-        return max(fwd, 0), STRAIGHT
-
-    # Proportional curve — always move at least a little
-    t      = (abs(horiz_err) - TURN_THRESHOLD) / (SPIN_THRESHOLD - TURN_THRESHOLD)
-    r_mag  = int(800 * (1 - t) + 200 * t)
+    # Proportional curve forward
+    t      = min(abs(horiz_err) / SPIN_THRESHOLD, 1.0)
+    r_mag  = int(800 * (1 - t) + 200 * t)   # 800mm (gentle) → 200mm (sharp)
     radius = -r_mag if horiz_err > 0 else r_mag
-    speed  = max(fwd + int(60 * (1 - t)), 60)   # never below 60 mm/s while curving
+
+    # Always drive forward — faster when far, slower (but never stopped) when close
+    if area_ratio < TARGET_AREA_MIN:
+        speed = FORWARD_SPEED
+    else:
+        speed = 100   # at target distance: slow crawl so it stays engaged
+
     return speed, radius
 
 
