@@ -4,8 +4,8 @@ import time
 from machine import UART, Pin
 
 # ── WiFi (phone hotspot) ──────────────────────────────────────────────────────
-WIFI_SSID = "Dale's iPhone"      # change to your phone hotspot name
-WIFI_PASS = "kittenflower123"     # change to your phone hotspot password
+WIFI_SSID = "Pierce's iPhone 15 Pro"      # change to your phone hotspot name
+WIFI_PASS = "DownloadTimely"     # change to your phone hotspot password
 CMD_PORT  = 9000
 WATCHDOG_MS = 1000   # stop Roomba if no command received for this long
 
@@ -65,11 +65,23 @@ def connect_wifi():
     sta.active(False)
     time.sleep_ms(300)
     sta.active(True)
-    time.sleep_ms(200)
+    time.sleep_ms(500)
 
     if sta.isconnected():
         sta.disconnect()
         time.sleep_ms(200)
+
+    # Scan so we can confirm the hotspot is visible at 2.4 GHz
+    print("Scanning for networks...")
+    found = [n[0].decode('utf-8', 'ignore') for n in sta.scan()]
+    print("  Visible SSIDs:", found)
+    if WIFI_SSID not in found:
+        print("  WARNING: '{}' not found in scan!".format(WIFI_SSID))
+        print("  If using an iPhone hotspot, enable Maximize Compatibility")
+        print("  (Settings → Personal Hotspot → Maximize Compatibility)")
+        print("  to force 2.4 GHz — ESP32 cannot use 5 GHz.")
+    else:
+        print("  '{}' found — connecting...".format(WIFI_SSID))
 
     sta.connect(WIFI_SSID, WIFI_PASS)
     print("Connecting to", WIFI_SSID, end="")
