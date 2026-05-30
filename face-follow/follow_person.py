@@ -1,8 +1,12 @@
 import cv2
+import os
 import socket
-import time
 import sys
+import time
 import argparse
+from dotenv import load_dotenv
+
+load_dotenv(override=True)
 
 # --- tuning ---
 CAMERA_INDEX = 0
@@ -25,12 +29,11 @@ CCW_SPIN = 1
 CMD_PORT = 9000
 CONFIRM_FRAMES = 2 # make tracking more stable
 
+ESP32_IP = os.getenv('ESP32_IP', '')   # set in .env, printed by follower.py on boot
+
 face_cascade = cv2.CascadeClassifier(
     cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
 )
-
-def discover_esp32():
-    return '192.168.4.1'
 
 
 def detect_largest_face(frame):
@@ -68,16 +71,16 @@ def compute_drive(horiz_err, area_ratio):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--host',   default=None, help='ESP32 IP (skip auto-discovery)')
+    parser.add_argument('--host',   default=None, help='ESP32 IP (overrides ESP32_IP in .env)')
     parser.add_argument('--camera', type=int, default=CAMERA_INDEX)
     args = parser.parse_args()
 
-    esp32_ip = args.host or discover_esp32()
-    if esp32_ip is None:
-        print("Roomba not found. Make sure the ESP32 is on the same WiFi network.")
-        print("Or specify its IP with:  --host <ip>")
+    esp32_ip = args.host or ESP32_IP
+    if not esp32_ip:
+        print("ESP32 IP not set. Add ESP32_IP=<ip> to .env (printed by follower.py on boot).")
+        print("Or pass it directly:  --host <ip>")
         sys.exit(1)
-    print(f"Roomba found at {esp32_ip}")
+    print(f"Connecting to ESP32 at {esp32_ip}")
 
     cmd_sock   = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     esp32_addr = (esp32_ip, CMD_PORT)

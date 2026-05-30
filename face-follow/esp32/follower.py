@@ -3,9 +3,10 @@ import socket
 import time
 from machine import UART, Pin
 
-AP_SSID     = 'Roomba'
-AP_PASSWORD = 'roomba123'
-CMD_PORT    = 9000
+# ── WiFi (phone hotspot) ──────────────────────────────────────────────────────
+WIFI_SSID = "YourHotspot"      # change to your phone hotspot name
+WIFI_PASS = "YourPassword"     # change to your phone hotspot password
+CMD_PORT  = 9000
 WATCHDOG_MS = 1000   # stop Roomba if no command received for this long
 
 BRC_PIN = 4
@@ -54,22 +55,28 @@ def beep(slot, notes):
 BOOT_SONG    = [(60, 16), (67, 24)]
 CONNECT_SONG = [(72, 8), (76, 8), (79, 12)]
 
-def start_ap():
-    # Disable station mode to avoid interference
-    sta = network.WLAN(network.STA_IF)
-    sta.active(False)
-
+def connect_wifi():
     ap = network.WLAN(network.AP_IF)
-    ap.active(True)
-    ap.config(ssid=AP_SSID, password=AP_PASSWORD,
-              authmode=network.AUTH_WPA_WPA2_PSK)
-    # ESP32 AP is always reachable at 192.168.4.1
-    print("AP started — connect Mac to WiFi:", AP_SSID)
-    print("ESP32 IP: 192.168.4.1")
-    return ap
+    ap.active(False)
+
+    sta = network.WLAN(network.STA_IF)
+    sta.active(True)
+    sta.connect(WIFI_SSID, WIFI_PASS)
+    print("Connecting to", WIFI_SSID, end="")
+    for _ in range(30):
+        if sta.isconnected():
+            break
+        time.sleep(0.5)
+        print(".", end="")
+    if not sta.isconnected():
+        raise OSError("WiFi failed — check SSID/password")
+    ip = sta.ifconfig()[0]
+    print("\nConnected! ESP32 IP:", ip)
+    print(">>> Set ESP32_IP =", ip, "in .env on the Mac <<<")
+    return ip
 
 # --- boot ---
-ap = start_ap()
+esp_ip = connect_wifi()
 
 print("Waking Roomba...")
 wake()
