@@ -83,6 +83,7 @@ def beep(slot, notes):
 
 BOOT_SONG    = [(60, 16), (67, 24)]
 CONNECT_SONG = [(72, 8), (76, 8), (79, 12)]
+ALERT_SONG   = [(84, 6), (84, 6), (84, 12)]   # phone caught — three sharp blips
 
 # --- boot ---
 # Press the CLEAN button on the Roomba BEFORE running this script if
@@ -111,6 +112,10 @@ while True:
                     time.sleep_ms(100)
                     beep(1, CONNECT_SONG)
                     print("Mac connected.")
+                elif line == "B":
+                    # Phone caught — sound the alert
+                    beep(2, ALERT_SONG)
+                    print("ALERT beep")
                 else:
                     parts = line.split()
                     if len(parts) == 2:

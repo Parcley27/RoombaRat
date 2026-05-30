@@ -9,22 +9,25 @@ RoombaRat patrol — merges the two original programs into one behaviour:
   TURN_AWAY spin in the OPPOSITE direction for a moment to leave that face, then
             drop back to SEARCH and lock onto whoever shows up next
 
-Driving reuses the face-follow path (UDP -> ESP32 -> Roomba). Phone detection /
+Driving reuses the face-follow path (USB serial -> ESP32 -> Roomba). Phone detection /
 Box / email reuse main.py's pipeline. Run with --dry-run (no robot) and
 --mock-phone (press 'p' to fake a phone) to exercise the whole state machine on a
 bare laptop with just a webcam.
 """
 
 import cv2
-import socket
+import os
 import time
 import sys
 import argparse
+import serial
+import serial.tools.list_ports
 from collections import deque
 from datetime import datetime
 
 # --- face-follow tuning (from follow_person.py) ---
-CAMERA_INDEX   = 0
+CAMERA_INDEX   = int(os.getenv('CAMERA_INDEX', '0'))
+CAMERA_ROTATE  = int(os.getenv('CAMERA_ROTATE', '0'))  # 0/90/180/-90 if feed is rotated
 FACE_TIMEOUT   = 0.5    # seconds to coast on last known position before searching
 CMD_INTERVAL   = 0.10   # min seconds between sending repeated identical commands
 
@@ -40,8 +43,11 @@ STRAIGHT = -32768
 CW_SPIN  = -1
 CCW_SPIN = 1
 
-CMD_PORT       = 9000
 CONFIRM_FRAMES = 2      # consecutive face frames before we trust it
+
+# ESP32 talks over USB serial now (no WiFi). Blank = auto-detect by port description.
+SERIAL_PORT    = os.getenv('SERIAL_PORT', '')   # e.g. COM5 or /dev/cu.usbserial-XXXX
+BAUD_RATE      = 115200
 
 # --- patrol behaviour ---
 ARRIVE_AREA    = 0.05   # face this fraction of frame => "reached" this person
@@ -83,6 +89,26 @@ def load_detector(name):
         return check_for_phone
     raise ValueError(f"unknown detector: {name}")
 
+
+def find_serial_port():
+    """Return the first USB-serial port that looks like an ESP32."""
+    for p in serial.tools.list_ports.comports():
+        desc = (p.description or '').lower()
+        if any(k in desc for k in ('cp210', 'ch340', 'uart', 'esp32', 'usb serial')):
+            return p.device
+    return None
+
+
+def rotate_frame(frame, deg):
+    if deg == 90:
+        return cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
+    if deg == -90:
+        return cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
+    if deg == 180:
+        return cv2.rotate(frame, cv2.ROTATE_180)
+    return frame
+
+
 face_cascade = cv2.CascadeClassifier(
     cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
 )
@@ -123,7 +149,7 @@ def compute_drive(horiz_err, area_ratio):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--host',   default=None, help='ESP32 IP (default 192.168.4.1)')
+    parser.add_argument('--port',   default=None, help='ESP32 serial port (overrides SERIAL_PORT in .env)')
     parser.add_argument('--camera', type=int, default=CAMERA_INDEX)
     parser.add_argument('--dry-run', action='store_true',
                         help='do not send to the robot — print commands instead')
@@ -151,15 +177,22 @@ def main():
     if phone_enabled and not args.mock_phone:
         print(f"Phone detector: {detector_name} (every {check_interval:.2f}s)")
 
-    esp32_ip   = args.host or '192.168.4.1'
-    cmd_sock   = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    esp32_addr = (esp32_ip, CMD_PORT)
-
+    ser = None
     if args.dry_run:
         print("[dry-run] robot commands will be printed, not sent.")
     else:
-        print(f"Roomba at {esp32_ip} — sending connect.")
-        cmd_sock.sendto(b'C\n', esp32_addr)
+        port = args.port or SERIAL_PORT or find_serial_port()
+        if not port:
+            print("Could not find ESP32 serial port. Plug in the USB-C cable, then either")
+            print("  set SERIAL_PORT=COM5 (or /dev/cu.usbserial-XXXX) in .env")
+            print("  or pass --port COM5")
+            print("Available ports:")
+            for p in serial.tools.list_ports.comports():
+                print(f"  {p.device}  {p.description}")
+            sys.exit(1)
+        print(f"Opening serial port {port} — sending connect.")
+        ser = serial.Serial(port, BAUD_RATE, timeout=0)
+        ser.write(b'C\n')
         time.sleep(0.5)
 
     cap = cv2.VideoCapture(args.camera)
@@ -182,21 +215,21 @@ def main():
             if args.dry_run:
                 return
             try:
-                cmd_sock.sendto(payload, esp32_addr)
-            except OSError as e:
-                print(f"Network error ({e}) — waiting for ESP32...")
+                ser.write(payload)
+            except serial.SerialException as e:
+                print(f"Serial error ({e}) — is the ESP32 still plugged in?")
 
     def send_drive(v, r):
         send(f"{v} {r}\n".encode(), 'drive')
 
     def send_beep():
-        # 'B' is handled by the patched ESP32 firmware (follower.py).
+        # 'B' is handled by the ESP32 serial firmware (face-follow/esp32/follower.py).
         if args.dry_run:
             print("[dry-run] BEEP")
             return
         try:
-            cmd_sock.sendto(b'B\n', esp32_addr)
-        except OSError:
+            ser.write(b'B\n')
+        except serial.SerialException:
             pass
 
     def trigger_alert(frame):
@@ -242,6 +275,7 @@ def main():
             ret, frame = cap.read()
             if not ret:
                 continue
+            frame = rotate_frame(frame, CAMERA_ROTATE)
             now = time.time()
 
             box = detect_largest_face(frame)
@@ -382,12 +416,12 @@ def main():
                     print(f"Could not switch to {new_name}: {e}")
 
     finally:
-        if not args.dry_run:
+        if not args.dry_run and ser is not None:
             try:
-                cmd_sock.sendto(b'0 0\n', esp32_addr)
-            except OSError:
+                ser.write(f"0 {STRAIGHT}\n".encode())
+            except serial.SerialException:
                 pass
-        cmd_sock.close()
+            ser.close()
         cap.release()
         cv2.destroyAllWindows()
         print("Stopped.")
